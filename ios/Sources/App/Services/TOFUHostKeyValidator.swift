@@ -11,6 +11,17 @@ import NIOSSH
 /// ship — verified against Citadel's actual `NIOSSHClientServerAuthenticationDelegate`
 /// hook and `String(openSSHPublicKey:)` (both confirmed present in the
 /// `Wellz26/swift-nio-ssh` fork Citadel depends on).
+/// Citadel's own `InvalidHostKey` (`ClientSession.swift`) is a `public
+/// struct` with no explicit `public init()`, so its compiler-synthesized
+/// initializer is `internal`-only and can't be constructed from outside
+/// the Citadel module — confirmed the hard way, via a real "inaccessible
+/// due to 'internal' protection level" build error. This is our own
+/// stand-in; any `Error` works for `EventLoopPromise<Void>.fail(_:)`.
+struct TOFUHostKeyRejection: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
+
 final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate {
     private let host: String
     private let port: Int
@@ -26,7 +37,7 @@ final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate {
         let openSSHLine = String(openSSHPublicKey: hostKey)
         let parts = openSSHLine.split(separator: " ")
         guard parts.count >= 2, let blob = Data(base64Encoded: String(parts[1])) else {
-            validationCompletePromise.fail(InvalidHostKey())
+            validationCompletePromise.fail(TOFUHostKeyRejection(reason: "Could not parse the host key presented by \(host):\(port)."))
             return
         }
 
@@ -43,8 +54,10 @@ final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate {
             // scenario TOFU exists to catch. Refuse rather than silently
             // reconnect. A real UI would surface this distinctly from a
             // plain connection failure (e.g. a blocking warning sheet); for
-            // now it surfaces as a connection error via `InvalidHostKey`.
-            validationCompletePromise.fail(InvalidHostKey())
+            // now it surfaces as a connection error with a clear message.
+            validationCompletePromise.fail(TOFUHostKeyRejection(
+                reason: "Host key for \(host):\(port) changed since the last connection — refusing to connect. This could mean the server was re-keyed, or someone is intercepting the connection."
+            ))
         }
     }
 }
