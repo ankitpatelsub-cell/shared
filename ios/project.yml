@@ -54,6 +54,12 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         DEVELOPMENT_TEAM: ""
         CODE_SIGN_IDENTITY: ""
+        # Xcode's default app-target settings imply an "AppIcon" asset set
+        # even though project.yml never asks for one, which fails
+        # actool ("None of the input catalogs contained ... AppIcon") since
+        # Assets.xcassets intentionally has no icon yet. Empty this out
+        # rather than shipping a placeholder icon.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
     info:
       path: Sources/App/Info.plist
       properties:
