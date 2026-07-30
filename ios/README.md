@@ -58,49 +58,79 @@ install`/`carthage` step.
 
 ## What's implemented vs. stubbed
 
-This is an MVP-shaped scaffold, not a store-ready build. Implemented:
+This is an MVP-shaped scaffold, not a store-ready build. There's no macOS
+toolchain in the environment this was built in, so nothing here has gone
+through `xcodebuild` — but the SSH/SFTP/terminal integration code was
+checked line-by-line against the actual upstream sources (Citadel 0.12.1,
+SwiftTerm 1.15.0, and the `Wellz26/swift-nio-ssh` fork Citadel depends on,
+all pulled via `git clone` and read directly) rather than written from
+memory, and fixed up where that reading turned up real API mismatches.
+
+Implemented:
 
 - Host CRUD, grouping, search, swipe actions (`Views/HostList`)
 - Keychain-backed password storage; SwiftData holds only metadata
 - Identity Manager: **real** Ed25519 key generation (proper
   `openssh-key-v1` container) and RSA 4096 generation (via `SecKey`,
   standard PKCS#1 PEM) — see `Services/IdentityKeyGenerator.swift`
+- **Real TOFU host key verification** (`Services/TOFUHostKeyValidator.swift`):
+  wired into Citadel's actual extension point,
+  `SSHHostKeyValidator.custom(_: NIOSSHClientServerAuthenticationDelegate)`.
+  Pins the fingerprint on first connect via `HostKeyStore`, hard-fails on a
+  later mismatch. This replaces the placeholder `.acceptAnything()` spec
+  section 6 says must never ship.
+- **Real Ed25519 private-key SSH auth**: Citadel's
+  `SSHAuthenticationMethod.ed25519(username:privateKey:)` takes a plain
+  swift-crypto `Curve25519.Signing.PrivateKey`, so
+  `IdentityKeyGenerator.parseEd25519PrivateKey(pem:)` reverses the
+  `openssh-key-v1` container back to the raw 32-byte seed and hands it
+  straight to Citadel — no placeholder in this path anymore.
+- **Real interactive shell I/O**: `SSHSessionManager` uses Citadel's actual
+  `client.withPTY(_:perform:)` (there is no `requestShell()` — that was a
+  guess from an earlier pass, corrected after reading `TTY/Client/TTY.swift`
+  directly). `perform`'s closure only returns when the session ends, so
+  `connect()` runs it inside a long-lived `Task` and stashes the
+  `TTYStdinWriter` it hands back for `send(_:hostID:)`/resize.
 - Face ID / passcode app lock, re-locks on backgrounding
 - Terminal screen with the extra-keys accessory bar (Esc/Tab/Ctrl/Alt/
   arrows) wired to send raw bytes
 - Multi-session tabs via `SessionStore` (swipe between open sessions)
-- SFTP browser UI (list/upload/download/rename/delete/new folder)
+- SFTP browser (list/upload/download/rename/delete/new folder), matched
+  against Citadel's actual `SFTPClient`/`SFTPFile` (e.g. `listDirectory`
+  returns batched `SFTPMessage.Name.components`, not a flat list; file
+  mode is a raw POSIX `permissions: UInt32?`, not a `isDirectory` flag or
+  a pre-formatted string — both handled in `SFTPService`)
 
-Deliberately left as TODOs, called out in code comments where they live —
-**do not ship without closing these**:
+Genuinely left undone, for reasons confirmed against the real API rather
+than assumed:
 
-- **Host key verification** (`Services/SSHSessionManager.swift`): currently
-  `.acceptAnything()`. Spec section 6 is explicit this must never ship.
-  `Services/HostKeyStore.swift` has the TOFU pinning logic ready; it needs
-  wiring into whatever host-key-validation hook Citadel exposes in the
-  version SwiftPM resolves (this has moved across Citadel releases and
-  couldn't be pinned down without a macOS toolchain to check
-  `Package.resolved` against).
-- **Private-key SSH auth**: Keychain storage/UI is wired end-to-end, but
-  `SSHSessionManager.makeAuthenticationMethod` throws
-  `privateKeyAuthNotYetWired` for `.privateKey` hosts — parsing Keychain
-  PEM into the `NIOSSHPrivateKey` variant Citadel's
-  `SSHAuthenticationMethod.privateKey` expects needs the same
-  version-check.
-- **Terminal stdin writing**: `SSHSessionManager.send(_:hostID:)` casts to
-  a local `SSHShellWriting` protocol as a placeholder for whatever
-  `requestShell()`'s real return type's write method turns out to be.
+- **RSA private-key SSH auth is not practically wireable through Citadel's
+  public API.** `Insecure.RSA.PrivateKey` (`Algorithms/RSA.swift`) has
+  exactly two initializers: one taking raw BoringSSL `BIGNUM` pointers
+  (`CCryptoBoringSSL` isn't an exposed product, so app code can't reach
+  it), and an internal from-scratch generator that's actually a
+  Diffie-Hellman-style computation misnamed "RSA" — not something you can
+  import a standard PEM into. `SSHSessionManager` throws
+  `SSHConnectionError.rsaPrivateKeyAuthUnsupported` with this explanation.
+  Use an Ed25519 identity for key-based auth instead.
 - Ctrl/Alt keys in the extra-keys bar toggle visually but don't yet remap
   the next keystroke (needs intercepting `TerminalView`'s key input).
 - iCloud sync toggle in Settings is UI-only (no CloudKit container wired).
 - Ed25519 key passphrases are stored in the Keychain but the on-disk
   `openssh-key-v1` private section is unencrypted — add bcrypt-pbkdf +
-  aes256-ctr before treating passphrase protection as real.
+  aes256-ctr before treating passphrase protection as real. The parser in
+  `IdentityKeyGenerator.parseEd25519PrivateKey` only handles `cipher "none"`
+  for the same reason and throws a clear error on an encrypted key.
+- The TOFU validator auto-trusts a *new* host key silently (matching
+  classic SSH `known_hosts` first-connect behavior) rather than prompting
+  the user before trusting it — only a *changed* key hard-fails. A
+  confirm-before-trust prompt would need bridging the synchronous
+  `EventLoopPromise`-based `validateHostKey` callback to an async UI
+  round-trip.
 
-None of this could be verified by actually compiling here — there's no
-macOS/Xcode toolchain in this environment. The GitHub Actions workflow
-(`.github/workflows/ios-unsigned-ipa.yml`) is where this actually builds,
-on a `macos` runner.
+The GitHub Actions workflow (`.github/workflows/ios-unsigned-ipa.yml`) is
+where this actually builds, on a `macos` runner — that's the first place
+any of this sees a real Swift compiler.
 
 ## Licensing (About screen)
 

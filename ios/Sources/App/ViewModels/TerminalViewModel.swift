@@ -17,7 +17,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     let host: Host
     let identity: Identity?
-    let terminalView = TerminalView()
+    let terminalView = TerminalView(frame: .zero)
 
     @Published private(set) var status: ConnectionStatus = .disconnected
 
@@ -31,12 +31,12 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     func connect() async {
         status = .connecting
         do {
-            _ = try await SSHSessionManager.shared.connect(
+            try await SSHSessionManager.shared.connect(
                 host: host,
                 identity: identity,
                 onOutput: { [weak self] data in
                     Task { @MainActor in
-                        self?.terminalView.feed(byteArray: Array(data))
+                        self?.terminalView.feed(byteArray: Array(data)[...])
                     }
                 },
                 onClose: { [weak self] in
@@ -73,7 +73,6 @@ extension TerminalViewModel: TerminalViewDelegate {
     }
 
     func setTerminalTitle(source: TerminalView, title: String) {}
-    func setTerminalIconTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

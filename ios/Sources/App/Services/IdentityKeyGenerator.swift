@@ -133,3 +133,96 @@ enum IdentityKeyGenerator {
         return (modulus, exponent)
     }
 }
+
+enum OpenSSHKeyParsingError: Error, LocalizedError {
+    case invalidPEM
+    case unsupportedCipher
+    case unsupportedKeyType
+    case truncated
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidPEM:
+            return "Could not parse this OpenSSH private key."
+        case .unsupportedCipher:
+            return "Encrypted OpenSSH private keys aren't supported yet — re-export without a passphrase (ssh-keygen -p -N \"\"), or generate the key in TermVault directly."
+        case .unsupportedKeyType:
+            return "Only Ed25519 keys can be used for SSH authentication right now — Citadel's RSA private-key type has no way to import a standard PEM through its public API."
+        case .truncated:
+            return "This OpenSSH private key is truncated or corrupt."
+        }
+    }
+}
+
+extension IdentityKeyGenerator {
+    /// Reverses `generateEd25519`'s `openssh-key-v1` encoding to recover the
+    /// raw 32-byte seed, which is what `Curve25519.Signing.PrivateKey`
+    /// needs. Only handles the unencrypted case (`cipher "none"`) — the
+    /// same limitation `generateEd25519` has on the write side. Real
+    /// `ssh-keygen`-produced unencrypted Ed25519 keys parse fine too, since
+    /// this follows the same openssh-key-v1 container format they use.
+    static func parseEd25519PrivateKey(pem: String) throws -> Curve25519.Signing.PrivateKey {
+        let body = pem
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.hasPrefix("-----") }
+            .joined()
+        guard let data = Data(base64Encoded: body) else { throw OpenSSHKeyParsingError.invalidPEM }
+        let bytes = Array(data)
+
+        var magic = Array("openssh-key-v1".utf8)
+        magic.append(0)
+        guard bytes.count > magic.count, Array(bytes.prefix(magic.count)) == magic else {
+            throw OpenSSHKeyParsingError.invalidPEM
+        }
+
+        var reader = ByteReader(bytes: bytes, offset: magic.count)
+        let cipherName = String(decoding: try reader.readString(), as: UTF8.self)
+        let kdfName = String(decoding: try reader.readString(), as: UTF8.self)
+        _ = try reader.readString() // kdfoptions
+        guard cipherName == "none", kdfName == "none" else {
+            throw OpenSSHKeyParsingError.unsupportedCipher
+        }
+
+        let keyCount = try reader.readUInt32()
+        guard keyCount == 1 else { throw OpenSSHKeyParsingError.invalidPEM }
+        _ = try reader.readString() // public key blob (re-derived from the private section below)
+
+        var privateReader = ByteReader(bytes: try reader.readString(), offset: 0)
+        _ = try privateReader.readUInt32() // checkint1
+        _ = try privateReader.readUInt32() // checkint2
+
+        let keyType = String(decoding: try privateReader.readString(), as: UTF8.self)
+        guard keyType == "ssh-ed25519" else { throw OpenSSHKeyParsingError.unsupportedKeyType }
+        _ = try privateReader.readString() // public key (32 bytes)
+
+        let expanded = try privateReader.readString() // 64 bytes: seed (32) + public key (32)
+        guard expanded.count == 64 else { throw OpenSSHKeyParsingError.truncated }
+        let seed = Array(expanded.prefix(32))
+
+        return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+    }
+
+    private struct ByteReader {
+        let bytes: [UInt8]
+        var offset: Int
+
+        mutating func readUInt32() throws -> UInt32 {
+            guard offset + 4 <= bytes.count else { throw OpenSSHKeyParsingError.truncated }
+            let value = (UInt32(bytes[offset]) << 24)
+                | (UInt32(bytes[offset + 1]) << 16)
+                | (UInt32(bytes[offset + 2]) << 8)
+                | UInt32(bytes[offset + 3])
+            offset += 4
+            return value
+        }
+
+        mutating func readString() throws -> [UInt8] {
+            let length = Int(try readUInt32())
+            guard length >= 0, offset + length <= bytes.count else { throw OpenSSHKeyParsingError.truncated }
+            let value = Array(bytes[offset..<offset + length])
+            offset += length
+            return value
+        }
+    }
+}

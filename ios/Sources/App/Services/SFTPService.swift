@@ -27,12 +27,8 @@ enum SFTPError: Error, LocalizedError {
 /// Wraps Citadel's SFTP subsystem for the file browser. One client per
 /// host, reusing the same `SSHClient` connection `SSHSessionManager` already
 /// holds open — SFTP rides the existing SSH session rather than opening a
-/// second connection.
-///
-/// As with `SSHSessionManager`, the exact Citadel SFTP API surface
-/// (`openSFTP()`, listing/read/write method names) has moved across
-/// releases; confirm the calls below against `Package.resolved` before
-/// relying on them.
+/// second connection. Verified against Citadel 0.12.1's actual
+/// `SFTPClient`/`SFTPFile` source.
 actor SFTPService {
     static let shared = SFTPService()
 
@@ -49,17 +45,21 @@ actor SFTPService {
 
     func listDirectory(hostID: UUID, sshClient: SSHClient, path: String) async throws -> [SFTPEntry] {
         let sftp = try await client(for: hostID, sshClient: sshClient)
-        let contents = try await sftp.listDirectory(atPath: path)
-        return contents
+        // `listDirectory` returns one `SFTPMessage.Name` per readdir round
+        // trip, each batching multiple entries in `.components` — flatten
+        // before mapping to our own model.
+        let components = try await sftp.listDirectory(atPath: path).flatMap(\.components)
+        return components
             .filter { $0.filename != "." && $0.filename != ".." }
             .map { component in
-                SFTPEntry(
+                let mode = component.attributes.permissions ?? 0
+                return SFTPEntry(
                     name: component.filename,
                     path: (path as NSString).appendingPathComponent(component.filename),
-                    isDirectory: component.attributes.isDirectory,
+                    isDirectory: Self.isDirectory(posixMode: mode),
                     size: Int64(component.attributes.size ?? 0),
-                    permissions: component.attributes.permissionsDescription ?? "—",
-                    modifiedAt: component.attributes.modificationDate
+                    permissions: Self.permissionsString(posixMode: mode),
+                    modifiedAt: component.attributes.accessModificationTime?.modificationTime
                 )
             }
             .sorted { lhs, rhs in
@@ -68,12 +68,29 @@ actor SFTPService {
             }
     }
 
+    private static func isDirectory(posixMode: UInt32) -> Bool {
+        (posixMode & 0o170000) == 0o040000
+    }
+
+    private static func permissionsString(posixMode: UInt32) -> String {
+        guard posixMode != 0 else { return "—" }
+        let bits = posixMode & 0o777
+        var result = ""
+        for shift in stride(from: 6, through: 0, by: -3) {
+            let triplet = (bits >> shift) & 0o7
+            result += (triplet & 0b100) != 0 ? "r" : "-"
+            result += (triplet & 0b010) != 0 ? "w" : "-"
+            result += (triplet & 0b001) != 0 ? "x" : "-"
+        }
+        return result
+    }
+
     func download(hostID: UUID, sshClient: SSHClient, remotePath: String, to localURL: URL) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
-        let data = try await sftp.withFile(filePath: remotePath, flags: .read) { file in
+        let buffer = try await sftp.withFile(filePath: remotePath, flags: .read) { file in
             try await file.readAll()
         }
-        try data.write(to: localURL)
+        try Data(buffer.readableBytesView).write(to: localURL)
     }
 
     func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String) async throws {
@@ -97,9 +114,9 @@ actor SFTPService {
     func delete(hostID: UUID, sshClient: SSHClient, path: String, isDirectory: Bool) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
         if isDirectory {
-            try await sftp.rmdir(atPath: path)
+            try await sftp.rmdir(at: path)
         } else {
-            try await sftp.remove(atPath: path)
+            try await sftp.remove(at: path)
         }
     }
 

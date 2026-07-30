@@ -1,18 +1,19 @@
 import Foundation
 import Citadel
 import NIOCore
+import NIOSSH
 
 enum SSHConnectionError: Error, LocalizedError {
     case noAuthenticationConfigured
-    case privateKeyAuthNotYetWired
+    case rsaPrivateKeyAuthUnsupported
     case notConnected
 
     var errorDescription: String? {
         switch self {
         case .noAuthenticationConfigured:
             return "This host has no password or SSH key configured."
-        case .privateKeyAuthNotYetWired:
-            return "SSH key authentication needs Citadel's private-key parsing wired in for your resolved package version — see SSHSessionManager.makeAuthenticationMethod."
+        case .rsaPrivateKeyAuthUnsupported:
+            return "RSA key auth isn't supported: Citadel's Insecure.RSA.PrivateKey has no PEM/DER import initializer in its public API (only a raw-BoringSSL-BIGNUM constructor and an internal generator). Use an Ed25519 identity instead — Citadel supports that fully via .ed25519(username:privateKey:)."
         case .notConnected:
             return "Not connected."
         }
@@ -21,19 +22,21 @@ enum SSHConnectionError: Error, LocalizedError {
 
 /// Owns every live SSH connection, keyed by host ID, so switching between
 /// terminal tabs never reconnects — mirrors Termius' tab-switching model.
-/// One actor, one source of truth for "what's currently connected."
+///
+/// Built on Citadel's real client API (verified against the actual
+/// `orlandos-nl/Citadel` source, tag 0.12.1): connect via `SSHClientSettings`
+/// + `SSHClient.connect(to:)`, and get an interactive shell via
+/// `client.withPTY(_:perform:)`, whose `perform` closure only returns once
+/// the session ends — so `connect()` runs it inside a long-lived `Task` and
+/// stashes the `TTYStdinWriter` it hands back for later `send(_:hostID:)`
+/// calls, rather than trying to hold onto a persistent "shell" object the
+/// way `requestShell()` (which doesn't exist in this API) would suggest.
 actor SSHSessionManager {
     static let shared = SSHSessionManager()
 
     private var clients: [UUID: SSHClient] = [:]
-    /// The live shell handle returned by `client.requestShell()`. Typed as
-    /// `Any` deliberately: Citadel's exact return type for `requestShell()`
-    /// has moved across releases, and this scaffold is written without a
-    /// macOS/SwiftPM toolchain available to pin it down. Cast at the call
-    /// site in `send(_:hostID:)` once you've confirmed the type against
-    /// `Package.resolved`.
-    private var shells: [UUID: Any] = [:]
-    private var readers: [UUID: Task<Void, Never>] = [:]
+    private var writers: [UUID: TTYStdinWriter] = [:]
+    private var sessionTasks: [UUID: Task<Void, Never>] = [:]
 
     func isConnected(hostID: UUID) -> Bool {
         clients[hostID] != nil
@@ -43,76 +46,78 @@ actor SSHSessionManager {
         clients[hostID]
     }
 
-    @discardableResult
     func connect(
         host: Host,
         identity: Identity?,
         onOutput: @escaping @Sendable (Data) -> Void,
         onClose: @escaping @Sendable () -> Void
-    ) async throws -> SSHClient {
-        if let existing = clients[host.id] {
-            return existing
-        }
+    ) async throws {
+        if clients[host.id] != nil { return }
 
         let authMethod = try makeAuthenticationMethod(host: host, identity: identity)
-
-        // `.acceptAnything()` is a placeholder — spec section 6 is explicit
-        // this must never ship. Before release, replace it with a
-        // validator that fingerprints the presented host key and runs it
-        // through `HostKeyStore.evaluate(fingerprint:host:port:)`,
-        // prompting the user on `.trustedNew` / `.mismatch` and only
-        // proceeding silently on `.trustedMatch`.
-        let client = try await SSHClient.connect(
+        let settings = SSHClientSettings(
             host: host.address,
             port: host.port,
-            authenticationMethod: authMethod,
-            hostKeyValidator: .acceptAnything()
+            authenticationMethod: { authMethod },
+            hostKeyValidator: .custom(TOFUHostKeyValidator(host: host.address, port: host.port))
         )
 
+        let client = try await SSHClient.connect(to: settings)
         clients[host.id] = client
 
-        let shell = try await client.requestShell()
-        shells[host.id] = shell
-
-        let reader = Task { [weak self] in
+        let hostID = host.id
+        sessionTasks[hostID] = Task {
             do {
-                for try await chunk in shell.stdout {
-                    onOutput(Data(chunk.readableBytesView))
+                try await client.withPTY(
+                    SSHChannelRequestEvent.PseudoTerminalRequest(
+                        wantReply: true,
+                        term: "xterm-256color",
+                        terminalCharacterWidth: 80,
+                        terminalRowHeight: 24,
+                        terminalPixelWidth: 0,
+                        terminalPixelHeight: 0,
+                        terminalModes: SSHTerminalModes([:])
+                    )
+                ) { inbound, outbound in
+                    await self.storeWriter(outbound, forHostID: hostID)
+                    for try await chunk in inbound {
+                        switch chunk {
+                        case .stdout(let buffer), .stderr(let buffer):
+                            onOutput(Data(buffer.readableBytesView))
+                        }
+                    }
                 }
             } catch {
-                // Stream ended (error or EOF) — fall through to teardown.
+                // Falls through to teardown below regardless of whether the
+                // session ended cleanly (remote closed) or with an error.
             }
-            await self?.disconnect(hostID: host.id)
+            await self.disconnect(hostID: hostID)
             onClose()
         }
-        readers[host.id] = reader
-
-        return client
     }
 
-    /// Writes keystrokes from the terminal view into the remote shell's
-    /// stdin. See the `shells` doc comment above re: confirming the real
-    /// write method name/signature for your resolved Citadel version.
+    private func storeWriter(_ writer: TTYStdinWriter, forHostID hostID: UUID) {
+        writers[hostID] = writer
+    }
+
     func send(_ text: String, hostID: UUID) async throws {
-        guard let shell = shells[hostID] as? SSHShellWriting else {
-            throw SSHConnectionError.notConnected
-        }
-        var buffer = ByteBufferAllocator().buffer(capacity: text.utf8.count)
-        buffer.writeString(text)
-        try await shell.write(buffer)
+        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+        try await writer.write(ByteBuffer(string: text))
     }
 
     func resize(hostID: UUID, cols: Int, rows: Int) async throws {
-        guard clients[hostID] != nil else { throw SSHConnectionError.notConnected }
-        // TODO: forward a window-change request once wired against the
-        // resolved Citadel API (e.g. `client.updatePTYSize(...)`).
+        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+        try await writer.changeSize(cols: cols, rows: rows, pixelWidth: 0, pixelHeight: 0)
     }
 
     func disconnect(hostID: UUID) async {
-        readers[hostID]?.cancel()
-        readers[hostID] = nil
-        shells[hostID] = nil
-        clients[hostID] = nil
+        sessionTasks[hostID]?.cancel()
+        sessionTasks[hostID] = nil
+        writers[hostID] = nil
+        if let client = clients[hostID] {
+            clients[hostID] = nil
+            try? await client.close()
+        }
     }
 
     func disconnectAll() async {
@@ -125,23 +130,19 @@ actor SSHSessionManager {
         switch host.authMethod {
         case .password:
             let password = try KeychainService.password(for: host)
-            return .password(username: host.username, password: password)
+            return .passwordBased(username: host.username, password: password)
         case .privateKey:
-            // Parsing the Keychain-stored PEM into the NIOSSHPrivateKey
-            // variant Citadel's `.privateKey` case expects is
-            // version-specific (RSA vs Ed25519 use different swift-crypto
-            // wrapper types). Wire this up once against the exact Citadel
-            // release resolved in Package.resolved, then remove this throw.
-            throw SSHConnectionError.privateKeyAuthNotYetWired
+            guard let identity else { throw SSHConnectionError.noAuthenticationConfigured }
+            switch identity.keyType {
+            case .ed25519:
+                let pem = try KeychainService.privateKeyPEM(for: identity)
+                let privateKey = try IdentityKeyGenerator.parseEd25519PrivateKey(pem: pem)
+                return .ed25519(username: host.username, privateKey: privateKey)
+            case .rsa4096:
+                throw SSHConnectionError.rsaPrivateKeyAuthUnsupported
+            }
         case .none:
             throw SSHConnectionError.noAuthenticationConfigured
         }
     }
-}
-
-/// Minimal protocol capturing the one method `send(_:hostID:)` needs from
-/// whatever concrete shell-handle type Citadel returns. Conform the real
-/// type (or wrap it) once confirmed — see the `shells` doc comment above.
-protocol SSHShellWriting {
-    func write(_ buffer: ByteBuffer) async throws
 }

@@ -7,11 +7,8 @@ import Foundation
 /// legitimate re-key or a MITM — and must surface as a blocking prompt, not
 /// a silent pass-through.
 ///
-/// This store only tracks the trust decision. Wiring it into a live
-/// connection means bridging it to Citadel's host-key verification
-/// extension point in `SSHSessionManager`; verify that surface against the
-/// exact Citadel version SwiftPM resolves (`Package.resolved`), since it has
-/// shifted across releases.
+/// Wired into live connections via `TOFUHostKeyValidator`, which Citadel
+/// calls through `SSHHostKeyValidator.custom(_:)`.
 final class HostKeyStore {
     static let shared = HostKeyStore()
 
