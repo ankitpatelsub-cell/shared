@@ -92,8 +92,16 @@ Implemented:
   `connect()` runs it inside a long-lived `Task` and stashes the
   `TTYStdinWriter` it hands back for `send(_:hostID:)`/resize.
 - Face ID / passcode app lock, re-locks on backgrounding
-- Terminal screen with the extra-keys accessory bar (Esc/Tab/Ctrl/Alt/
-  arrows) wired to send raw bytes
+- **Full extra-keys accessory bar** (`Views/Terminal/ExtraKeysAccessoryView.swift`),
+  built for typing on a soft keyboard with no physical modifier/navigation
+  keys: Esc, Tab, real one-shot Ctrl/Alt chording (tap the toggle, then
+  the next keystroke gets transformed — `TerminalViewModel.pendingModifier`),
+  arrows, Home/End/PgUp/PgDn/Delete, and Copy/Paste/Select wired to
+  SwiftTerm's own built-in `copy(_:)`/`paste(_:)`/`selectAll()` (the same
+  edit-action machinery behind the system long-press menu — not
+  reimplemented). A "More" sheet adds one-tap Ctrl-chords used constantly
+  in a shell (Ctrl+C/D/L/A/E/U/K/W/R/Z). No "Cut" button — a remote
+  shell's scrollback isn't editable text with something to remove *from*.
 - Multi-session tabs via `SessionStore` (swipe between open sessions)
 - SFTP browser (list/upload/download/rename/delete/new folder), matched
   against Citadel's actual `SFTPClient`/`SFTPFile` (e.g. `listDirectory`
@@ -113,8 +121,6 @@ than assumed:
   import a standard PEM into. `SSHSessionManager` throws
   `SSHConnectionError.rsaPrivateKeyAuthUnsupported` with this explanation.
   Use an Ed25519 identity for key-based auth instead.
-- Ctrl/Alt keys in the extra-keys bar toggle visually but don't yet remap
-  the next keystroke (needs intercepting `TerminalView`'s key input).
 - iCloud sync toggle in Settings is UI-only (no CloudKit container wired).
 - Ed25519 key passphrases are stored in the Keychain but the on-disk
   `openssh-key-v1` private section is unencrypted — add bcrypt-pbkdf +

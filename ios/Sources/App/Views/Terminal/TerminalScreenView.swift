@@ -11,7 +11,7 @@ struct TerminalScreenView: View {
             TerminalRepresentable(terminalView: viewModel.terminalView)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ExtraKeysAccessoryView(terminalView: viewModel.terminalView)
+            ExtraKeysAccessoryView(viewModel: viewModel)
         }
         .background(Color.black)
         .toolbar(.hidden, for: .tabBar)
