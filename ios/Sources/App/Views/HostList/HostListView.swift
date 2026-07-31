@@ -13,42 +13,61 @@ struct HostListView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(viewModel.filteredGroups(from: hosts), id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.hosts) { host in
-                            HostRow(host: host)
-                                .contentShape(Rectangle())
-                                .onTapGesture { connectingHost = host }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        delete(host)
-                                    } label: { Label("Delete", systemImage: "trash") }
+            Group {
+                if hosts.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(viewModel.filteredGroups(from: hosts), id: \.title) { group in
+                            Section {
+                                ForEach(group.hosts) { host in
+                                    HostRow(host: host)
+                                        .cardBackground()
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { connectingHost = host }
+                                        .swipeActions(edge: .trailing) {
+                                            Button(role: .destructive) {
+                                                delete(host)
+                                            } label: { Label("Delete", systemImage: "trash") }
 
-                                    Button {
-                                        editingHost = host
-                                    } label: { Label("Edit", systemImage: "pencil") }
-                                    .tint(.blue)
+                                            Button {
+                                                editingHost = host
+                                            } label: { Label("Edit", systemImage: "pencil") }
+                                            .tint(.blue)
+                                        }
+                                        .swipeActions(edge: .leading) {
+                                            Button {
+                                                connectingHost = host
+                                            } label: { Label("Connect", systemImage: "bolt.fill") }
+                                            .tint(.green)
+                                        }
+                                        .contextMenu {
+                                            Button("Duplicate") { duplicate(host) }
+                                            ShareLink(item: host.connectionSubtitle)
+                                        }
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                                } header: {
+                                    Text(group.title)
+                                        .font(.system(.subheadline, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .textCase(nil)
                                 }
-                                .swipeActions(edge: .leading) {
-                                    Button {
-                                        connectingHost = host
-                                    } label: { Label("Connect", systemImage: "bolt.fill") }
-                                    .tint(.green)
-                                }
-                                .contextMenu {
-                                    Button("Duplicate") { duplicate(host) }
-                                    ShareLink(item: host.connectionSubtitle)
-                                }
+                            }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemGroupedBackground))
                 }
             }
             .searchable(text: $viewModel.searchText)
             .navigationTitle("Hosts")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { isPresentingNewHost = true } label: { Image(systemName: "plus") }
+                    Button { isPresentingNewHost = true } label: { Image(systemName: "plus.circle.fill") }
+                        .font(.title3)
                 }
             }
             .sheet(isPresented: $isPresentingNewHost) {
@@ -60,6 +79,17 @@ struct HostListView: View {
             .navigationDestination(item: $connectingHost) { host in
                 ConnectDestinationView(host: host, identity: identity(for: host))
             }
+        }
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No Hosts Yet", systemImage: "server.rack")
+        } description: {
+            Text("Add a host to start an SSH session.")
+        } actions: {
+            Button("Add Host") { isPresentingNewHost = true }
+                .buttonStyle(.borderedProminent)
         }
     }
 
@@ -94,16 +124,23 @@ private struct HostRow: View {
     let host: Host
 
     var body: some View {
-        HStack {
-            Image(systemName: "server.rack")
-                .foregroundStyle(.tint)
-                .frame(width: 28)
-            VStack(alignment: .leading) {
-                Text(host.label).font(.body)
+        HStack(spacing: 12) {
+            HostAvatarView(label: host.label)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(host.label)
+                    .font(.system(.body, weight: .semibold))
                 Text(host.connectionSubtitle)
-                    .font(.caption)
+                    .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: host.authMethod == .privateKey ? "key.fill" : "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel(host.authMethod == .privateKey ? "SSH key auth" : "Password auth")
         }
     }
 }

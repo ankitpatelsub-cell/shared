@@ -28,40 +28,50 @@ struct TerminalScreenView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 10, height: 10)
-            Text(viewModel.host.label)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Spacer()
-            Text(statusLabel)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-            Button {
-                showingSFTP = true
-            } label: {
-                Image(systemName: "folder")
+        HStack(spacing: 12) {
+            HostAvatarView(label: viewModel.host.label, size: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.host.label)
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(.white)
+                statusBadge
             }
-            Button {
-                sessionStore.close(viewModel)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.white)
-            }
+
+            Spacer(minLength: 8)
+
+            topBarButton("folder") { showingSFTP = true }
+            topBarButton("xmark") { sessionStore.close(viewModel) }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.9))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.92))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5)
+        }
     }
 
-    private var statusColor: Color {
-        switch viewModel.status {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .disconnected, .failed: return .red
+    private var statusBadge: some View {
+        let color = Theme.Status.color(for: viewModel.status)
+        return HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .shadow(color: color.opacity(0.8), radius: viewModel.status == .connecting ? 4 : 0)
+            Text(statusLabel)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+        }
+    }
+
+    private func topBarButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(.white.opacity(0.12)))
         }
     }
 

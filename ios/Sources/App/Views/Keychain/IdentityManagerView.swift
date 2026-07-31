@@ -13,29 +13,26 @@ struct IdentityManagerView: View {
         NavigationStack {
             List {
                 ForEach(identities) { identity in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(identity.label).font(.body)
-                        Text(identity.keyType.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(identity.fingerprint)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            viewModel.delete(identity, context: modelContext)
-                        } label: { Label("Delete", systemImage: "trash") }
+                    IdentityRow(identity: identity)
+                        .cardBackground()
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                viewModel.delete(identity, context: modelContext)
+                            } label: { Label("Delete", systemImage: "trash") }
 
-                        ShareLink(item: identity.publicKey) {
-                            Label("Export", systemImage: "square.and.arrow.up")
+                            ShareLink(item: identity.publicKey) {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(.blue)
                         }
-                        .tint(.blue)
-                    }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
             .overlay {
                 if identities.isEmpty {
                     ContentUnavailableView(
@@ -52,7 +49,8 @@ struct IdentityManagerView: View {
                         Button("Generate New Key") { showingGenerate = true }
                         Button("Import Key") { showingImport = true }
                     } label: {
-                        Image(systemName: "plus")
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
                     }
                 }
             }
@@ -70,6 +68,41 @@ struct IdentityManagerView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
+        }
+    }
+}
+
+private struct IdentityRow: View {
+    let identity: Identity
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.15))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "key.fill")
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(identity.label)
+                    .font(.system(.body, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(identity.keyType.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Text(identity.fingerprint)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer(minLength: 8)
         }
     }
 }

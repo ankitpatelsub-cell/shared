@@ -59,10 +59,13 @@ struct ExtraKeysAccessoryView: View {
 
                 keyButton("•••") { showingShortcuts = true }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
         .background(.thinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.primary.opacity(0.08)).frame(height: 0.5)
+        }
         .sheet(isPresented: $showingShortcuts) {
             QuickShortcutsSheet(viewModel: viewModel)
                 .presentationDetents([.medium])
@@ -71,17 +74,16 @@ struct ExtraKeysAccessoryView: View {
 
     private var divider: some View {
         Rectangle()
-            .fill(.secondary.opacity(0.3))
-            .frame(width: 1, height: 24)
+            .fill(.secondary.opacity(0.25))
+            .frame(width: 1, height: 22)
     }
 
     private func keyButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 15, weight: .medium, design: .monospaced))
-                .frame(minWidth: 40, minHeight: 32)
+                .frame(minWidth: 36, minHeight: 30)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(KeyCapStyle(isActive: false))
     }
 
     private func toggleButton(_ label: String, modifier: TerminalModifier) -> some View {
@@ -90,15 +92,34 @@ struct ExtraKeysAccessoryView: View {
             viewModel.toggleModifier(modifier)
         } label: {
             Text(label)
-                .font(.system(size: 15, weight: .medium, design: .monospaced))
-                .frame(minWidth: 40, minHeight: 32)
+                .frame(minWidth: 36, minHeight: 30)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(isActive ? .accentColor : .secondary)
+        .buttonStyle(KeyCapStyle(isActive: isActive))
     }
 
     private func sendCSI(_ suffix: String) {
         viewModel.sendRawBytes(Array("\u{1B}[\(suffix)".utf8))
+    }
+}
+
+/// Consistent "keycap" look for the whole accessory bar — a soft rounded
+/// tile that darkens on press and fills with the accent color when active
+/// (the Ctrl/Alt toggles), instead of the default `.bordered` pill that
+/// reads as generic system chrome everywhere else in iOS.
+private struct KeyCapStyle: ButtonStyle {
+    let isActive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .medium, design: .monospaced))
+            .foregroundStyle(isActive ? Color.white : Color.primary)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.controlCornerRadius, style: .continuous)
+                    .fill(isActive ? Color.accentColor : Color.primary.opacity(configuration.isPressed ? 0.16 : 0.07))
+            )
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -129,15 +150,23 @@ private struct QuickShortcutsSheet: View {
                 Button {
                     viewModel.sendControlChord(shortcut.letter)
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
                         Text(shortcut.label)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(width: 90, alignment: .leading)
+                            .font(.system(.subheadline, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .frame(width: 76)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor)
+                            )
                         Text(shortcut.description)
                             .foregroundStyle(.secondary)
+                        Spacer()
                     }
                 }
                 .buttonStyle(.plain)
+                .padding(.vertical, 2)
             }
             .navigationTitle("Shortcuts")
             .navigationBarTitleDisplayMode(.inline)
