@@ -152,7 +152,7 @@ private struct QuickShortcutsSheet: View {
                 } label: {
                     HStack(spacing: 12) {
                         Text(shortcut.label)
-                            .font(.system(.subheadline, weight: .semibold, design: .monospaced))
+                            .font(.system(.subheadline, design: .monospaced, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 76)
                             .padding(.vertical, 6)

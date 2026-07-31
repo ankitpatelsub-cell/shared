@@ -17,49 +17,7 @@ struct HostListView: View {
                 if hosts.isEmpty {
                     emptyState
                 } else {
-                    List {
-                        ForEach(viewModel.filteredGroups(from: hosts), id: \.title) { group in
-                            Section {
-                                ForEach(group.hosts) { host in
-                                    HostRow(host: host)
-                                        .cardBackground()
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { connectingHost = host }
-                                        .swipeActions(edge: .trailing) {
-                                            Button(role: .destructive) {
-                                                delete(host)
-                                            } label: { Label("Delete", systemImage: "trash") }
-
-                                            Button {
-                                                editingHost = host
-                                            } label: { Label("Edit", systemImage: "pencil") }
-                                            .tint(.blue)
-                                        }
-                                        .swipeActions(edge: .leading) {
-                                            Button {
-                                                connectingHost = host
-                                            } label: { Label("Connect", systemImage: "bolt.fill") }
-                                            .tint(.green)
-                                        }
-                                        .contextMenu {
-                                            Button("Duplicate") { duplicate(host) }
-                                            ShareLink(item: host.connectionSubtitle)
-                                        }
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                                } header: {
-                                    Text(group.title)
-                                        .font(.system(.subheadline, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .textCase(nil)
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemGroupedBackground))
+                    hostList
                 }
             }
             .searchable(text: $viewModel.searchText)
@@ -80,6 +38,38 @@ struct HostListView: View {
                 ConnectDestinationView(host: host, identity: identity(for: host))
             }
         }
+    }
+
+    /// Split out of `body` — the compiler couldn't type-check the List,
+    /// ForEach/Section, and per-row swipe-action/context-menu chain as one
+    /// nested expression ("unable to type-check this expression in
+    /// reasonable time"). Breaking it into its own property, with the row
+    /// itself further extracted to `HostListRow`, gives the type checker
+    /// smaller pieces to solve independently.
+    private var hostList: some View {
+        List {
+            ForEach(viewModel.filteredGroups(from: hosts), id: \.title) { group in
+                Section {
+                    ForEach(group.hosts) { host in
+                        HostListRow(
+                            host: host,
+                            onConnect: { connectingHost = host },
+                            onEdit: { editingHost = host },
+                            onDelete: { delete(host) },
+                            onDuplicate: { duplicate(host) }
+                        )
+                    }
+                } header: {
+                    Text(group.title)
+                        .font(.system(.subheadline, design: .default, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
     }
 
     private var emptyState: some View {
@@ -120,6 +110,47 @@ struct HostListView: View {
     }
 }
 
+/// One row's full modifier chain (swipe actions, context menu, list-row
+/// styling), pulled out of `HostListView.hostList` so each piece is its
+/// own small expression for the type checker rather than one giant nested
+/// closure tree.
+private struct HostListRow: View {
+    let host: Host
+    let onConnect: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onDuplicate: () -> Void
+
+    var body: some View {
+        HostRow(host: host)
+            .cardBackground()
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onConnect)
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+                Button(action: onEdit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .leading) {
+                Button(action: onConnect) {
+                    Label("Connect", systemImage: "bolt.fill")
+                }
+                .tint(.green)
+            }
+            .contextMenu {
+                Button("Duplicate", action: onDuplicate)
+                ShareLink(item: host.connectionSubtitle)
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+}
+
 private struct HostRow: View {
     let host: Host
 
@@ -129,7 +160,7 @@ private struct HostRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(host.label)
-                    .font(.system(.body, weight: .semibold))
+                    .font(.system(.body, design: .default, weight: .semibold))
                 Text(host.connectionSubtitle)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
