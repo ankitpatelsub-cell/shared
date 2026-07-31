@@ -1,0 +1,148 @@
+import Foundation
+import Citadel
+import NIOCore
+import NIOSSH
+
+enum SSHConnectionError: Error, LocalizedError {
+    case noAuthenticationConfigured
+    case rsaPrivateKeyAuthUnsupported
+    case notConnected
+
+    var errorDescription: String? {
+        switch self {
+        case .noAuthenticationConfigured:
+            return "This host has no password or SSH key configured."
+        case .rsaPrivateKeyAuthUnsupported:
+            return "RSA key auth isn't supported: Citadel's Insecure.RSA.PrivateKey has no PEM/DER import initializer in its public API (only a raw-BoringSSL-BIGNUM constructor and an internal generator). Use an Ed25519 identity instead — Citadel supports that fully via .ed25519(username:privateKey:)."
+        case .notConnected:
+            return "Not connected."
+        }
+    }
+}
+
+/// Owns every live SSH connection, keyed by host ID, so switching between
+/// terminal tabs never reconnects — mirrors Termius' tab-switching model.
+///
+/// Built on Citadel's real client API (verified against the actual
+/// `orlandos-nl/Citadel` source, tag 0.12.1): connect via `SSHClientSettings`
+/// + `SSHClient.connect(to:)`, and get an interactive shell via
+/// `client.withPTY(_:perform:)`, whose `perform` closure only returns once
+/// the session ends — so `connect()` runs it inside a long-lived `Task` and
+/// stashes the `TTYStdinWriter` it hands back for later `send(_:hostID:)`
+/// calls, rather than trying to hold onto a persistent "shell" object the
+/// way `requestShell()` (which doesn't exist in this API) would suggest.
+actor SSHSessionManager {
+    static let shared = SSHSessionManager()
+
+    private var clients: [UUID: SSHClient] = [:]
+    private var writers: [UUID: TTYStdinWriter] = [:]
+    private var sessionTasks: [UUID: Task<Void, Never>] = [:]
+
+    func isConnected(hostID: UUID) -> Bool {
+        clients[hostID] != nil
+    }
+
+    func session(for hostID: UUID) -> SSHClient? {
+        clients[hostID]
+    }
+
+    func connect(
+        host: Host,
+        identity: Identity?,
+        onOutput: @escaping @Sendable (Data) -> Void,
+        onClose: @escaping @Sendable () -> Void
+    ) async throws {
+        if clients[host.id] != nil { return }
+
+        let authMethod = try makeAuthenticationMethod(host: host, identity: identity)
+        let settings = SSHClientSettings(
+            host: host.address,
+            port: host.port,
+            authenticationMethod: { authMethod },
+            hostKeyValidator: .custom(TOFUHostKeyValidator(host: host.address, port: host.port))
+        )
+
+        let client = try await SSHClient.connect(to: settings)
+        clients[host.id] = client
+
+        let hostID = host.id
+        sessionTasks[hostID] = Task {
+            do {
+                try await client.withPTY(
+                    SSHChannelRequestEvent.PseudoTerminalRequest(
+                        wantReply: true,
+                        term: "xterm-256color",
+                        terminalCharacterWidth: 80,
+                        terminalRowHeight: 24,
+                        terminalPixelWidth: 0,
+                        terminalPixelHeight: 0,
+                        terminalModes: SSHTerminalModes([:])
+                    )
+                ) { inbound, outbound in
+                    await self.storeWriter(outbound, forHostID: hostID)
+                    for try await chunk in inbound {
+                        switch chunk {
+                        case .stdout(let buffer), .stderr(let buffer):
+                            onOutput(Data(buffer.readableBytesView))
+                        }
+                    }
+                }
+            } catch {
+                // Falls through to teardown below regardless of whether the
+                // session ended cleanly (remote closed) or with an error.
+            }
+            await self.disconnect(hostID: hostID)
+            onClose()
+        }
+    }
+
+    private func storeWriter(_ writer: TTYStdinWriter, forHostID hostID: UUID) {
+        writers[hostID] = writer
+    }
+
+    func send(_ text: String, hostID: UUID) async throws {
+        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+        try await writer.write(ByteBuffer(string: text))
+    }
+
+    func resize(hostID: UUID, cols: Int, rows: Int) async throws {
+        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+        try await writer.changeSize(cols: cols, rows: rows, pixelWidth: 0, pixelHeight: 0)
+    }
+
+    func disconnect(hostID: UUID) async {
+        sessionTasks[hostID]?.cancel()
+        sessionTasks[hostID] = nil
+        writers[hostID] = nil
+        if let client = clients[hostID] {
+            clients[hostID] = nil
+            try? await client.close()
+        }
+    }
+
+    func disconnectAll() async {
+        for id in Array(clients.keys) {
+            await disconnect(hostID: id)
+        }
+    }
+
+    private func makeAuthenticationMethod(host: Host, identity: Identity?) throws -> SSHAuthenticationMethod {
+        switch host.authMethod {
+        case .password:
+            let password = try KeychainService.password(for: host)
+            return .passwordBased(username: host.username, password: password)
+        case .privateKey:
+            guard let identity else { throw SSHConnectionError.noAuthenticationConfigured }
+            switch identity.keyType {
+            case .ed25519:
+                let pem = try KeychainService.privateKeyPEM(for: identity)
+                let privateKey = try IdentityKeyGenerator.parseEd25519PrivateKey(pem: pem)
+                return .ed25519(username: host.username, privateKey: privateKey)
+            case .rsa4096:
+                throw SSHConnectionError.rsaPrivateKeyAuthUnsupported
+            }
+        case .none:
+            throw SSHConnectionError.noAuthenticationConfigured
+        }
+    }
+}
