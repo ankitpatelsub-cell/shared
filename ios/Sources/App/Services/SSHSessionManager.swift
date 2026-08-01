@@ -40,6 +40,10 @@ actor SSHSessionManager {
     private var clients: [UUID: SSHClient] = [:]
     private var hostIDs: [UUID: UUID] = [:]
     private var writers: [UUID: TTYStdinWriter] = [:]
+    // SwiftTerm commonly reports its real viewport before `withPTY` has
+    // finished creating the remote writer. Retain that early resize so the
+    // shell (and an attached tmux client) never stays at the 80x24 fallback.
+    private var pendingTerminalSizes: [UUID: (cols: Int, rows: Int)] = [:]
     private var sessionTasks: [UUID: Task<Void, Never>] = [:]
 
     func isConnected(connectionID: UUID) -> Bool {
@@ -119,8 +123,16 @@ actor SSHSessionManager {
         guard writers[connectionID] != nil else { throw SSHConnectionError.notConnected }
     }
 
-    private func storeWriter(_ writer: TTYStdinWriter, forConnectionID connectionID: UUID) {
+    private func storeWriter(_ writer: TTYStdinWriter, forConnectionID connectionID: UUID) async {
         writers[connectionID] = writer
+        if let size = pendingTerminalSizes[connectionID] {
+            try? await writer.changeSize(
+                cols: size.cols,
+                rows: size.rows,
+                pixelWidth: 0,
+                pixelHeight: 0
+            )
+        }
     }
 
     func send(_ text: String, connectionID: UUID) async throws {
@@ -133,7 +145,11 @@ actor SSHSessionManager {
     }
 
     func resize(connectionID: UUID, cols: Int, rows: Int) async throws {
-        guard let writer = writers[connectionID] else { throw SSHConnectionError.notConnected }
+        guard cols > 0, rows > 0 else { return }
+        pendingTerminalSizes[connectionID] = (cols, rows)
+        // A layout pass can arrive before the PTY writer. `storeWriter` will
+        // apply the retained dimensions as soon as the shell is ready.
+        guard let writer = writers[connectionID] else { return }
         try await writer.changeSize(cols: cols, rows: rows, pixelWidth: 0, pixelHeight: 0)
     }
 
@@ -141,6 +157,7 @@ actor SSHSessionManager {
         sessionTasks[connectionID]?.cancel()
         sessionTasks[connectionID] = nil
         writers[connectionID] = nil
+        pendingTerminalSizes[connectionID] = nil
         hostIDs[connectionID] = nil
         if let client = clients[connectionID] {
             clients[connectionID] = nil

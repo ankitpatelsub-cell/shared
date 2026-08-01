@@ -23,6 +23,7 @@ import SwiftTerm
 struct ExtraKeysAccessoryView: View {
     @ObservedObject var viewModel: TerminalViewModel
     @State private var showingShortcuts = false
+    @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
 
     private var terminalView: TerminalView { viewModel.terminalView }
 
@@ -36,6 +37,13 @@ struct ExtraKeysAccessoryView: View {
 
                 divider
 
+                keyButton("~") { sendText("~") }
+                keyButton("/") { sendText("/") }
+                keyButton("|") { sendText("|") }
+                keyButton("-") { sendText("-") }
+
+                divider
+
                 keyButton("←") { sendCSI("D") }
                 keyButton("↑") { sendCSI("A") }
                 keyButton("↓") { sendCSI("B") }
@@ -43,11 +51,14 @@ struct ExtraKeysAccessoryView: View {
 
                 divider
 
-                keyButton("Home") { sendCSI("H") }
-                keyButton("End") { sendCSI("F") }
-                keyButton("PgUp") { sendCSI("5~") }
-                keyButton("PgDn") { sendCSI("6~") }
-                keyButton("Del") { sendCSI("3~") }
+                if extendedKeys {
+                    keyButton("Home") { sendCSI("H") }
+                    keyButton("End") { sendCSI("F") }
+                    keyButton("PgUp") { sendCSI("5~") }
+                    keyButton("PgDn") { sendCSI("6~") }
+                    keyButton("Del") { sendCSI("3~") }
+                    keyButton("F1") { viewModel.sendRawBytes(Array("\u{1B}OP".utf8)) }
+                }
 
                 divider
 
@@ -99,6 +110,10 @@ struct ExtraKeysAccessoryView: View {
 
     private func sendCSI(_ suffix: String) {
         viewModel.sendRawBytes(Array("\u{1B}[\(suffix)".utf8))
+    }
+
+    private func sendText(_ text: String) {
+        viewModel.sendRawBytes(Array(text.utf8))
     }
 }
 

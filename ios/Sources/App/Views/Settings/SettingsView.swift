@@ -6,10 +6,26 @@ struct SettingsView: View {
     @AppStorage("dev.termvault.settings.iCloudSyncEnabled") private var iCloudSyncEnabled = false
     @AppStorage("dev.termvault.settings.agentNotifications") private var agentNotifications = false
     @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
+    @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
+    @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
+    @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearance) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Accent Color", selection: $accent) {
+                        ForEach(["blue", "purple", "green", "orange", "pink"], id: \.self) { color in
+                            Text(color.capitalized).tag(color)
+                        }
+                    }
+                }
                 Section("App Lock") {
                     Toggle("Face ID / Passcode Lock", isOn: $lockService.isBiometricLockEnabled)
                 }
@@ -18,6 +34,10 @@ struct SettingsView: View {
                         Text("Font Size: \(Int(fontSize))")
                     }
                     Toggle("Confirm Multiline Paste", isOn: $pasteProtection)
+                    Toggle("Extended Key Row", isOn: $extendedKeys)
+                    Text("Pinch directly on the terminal to change its font size.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Agents") {
                     NavigationLink("Agent Presets") { AgentPresetsView() }

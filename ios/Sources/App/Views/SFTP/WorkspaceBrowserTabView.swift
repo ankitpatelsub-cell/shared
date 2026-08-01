@@ -135,7 +135,7 @@ struct WorkspaceBrowserTabView: View {
 
     private func launch(_ workspace: WorkspaceSession, host: Host) {
         sessionStore.open(workspace: workspace, host: host, identity: identity(for: host))
-        navigationStore.selectedTab = .sessions
+        navigationStore.navigate(to: .sessions)
     }
 }
 

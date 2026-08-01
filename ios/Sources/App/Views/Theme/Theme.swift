@@ -10,6 +10,16 @@ enum Theme {
     static let cardPadding: CGFloat = 14
     static let sectionSpacing: CGFloat = 12
 
+    static func accentColor(for name: String) -> Color {
+        switch name {
+        case "purple": return .purple
+        case "green": return .green
+        case "orange": return .orange
+        case "pink": return .pink
+        default: return .blue
+        }
+    }
+
     enum Status {
         static func color(for status: ConnectionStatus) -> Color {
             switch status {

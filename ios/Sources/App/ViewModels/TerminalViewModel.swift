@@ -19,6 +19,23 @@ enum TerminalModifier: Equatable {
     case alt
 }
 
+enum TerminalAttachmentError: Error, LocalizedError {
+    case notConnected
+    case tooManyFiles(Int)
+    case fileTooLarge(String, Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            return "Connect the terminal before attaching files."
+        case .tooManyFiles(let maximum):
+            return "Select no more than \(maximum) files at once."
+        case .fileTooLarge(let name, let maximumBytes):
+            return "\(name) exceeds the \(maximumBytes / 1_048_576) MB attachment limit."
+        }
+    }
+}
+
 /// Bridges one SwiftTerm `TerminalView` to one `SSHSessionManager` session.
 /// Keystrokes flow out via `TerminalViewDelegate.send`, remote output flows
 /// in via the `onOutput` callback registered at connect time.
@@ -28,6 +45,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     let host: Host
     let identity: Identity?
     let terminalView = TerminalView(frame: .zero)
+    let persistenceKey: String
 
     @Published private(set) var status: ConnectionStatus = .disconnected
     @Published private(set) var responseLatencyMilliseconds: Int?
@@ -35,6 +53,10 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published private(set) var transcript = ""
     @Published var pendingMultilinePaste: [UInt8]?
     @Published var pendingModifier: TerminalModifier?
+    @Published var customTitle: String?
+    @Published var isPinned = false
+    @Published private(set) var isViewingHistory = false
+    @Published private(set) var attachmentUploadProgress: String?
 
     // SwiftTerm can emit several small delegate callbacks during a fast typing
     // burst. Keep one ordered drain alive instead of creating an unstructured
@@ -43,12 +65,15 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     private var inputDrainTask: Task<Void, Never>?
     private var pendingOutput: [UInt8] = []
     private var outputFlushTask: Task<Void, Never>?
+    private var resizeTask: Task<Void, Never>?
     private var responseStartedAt: Date?
     private var attachedTmuxName: String?
+    private var terminalSize: (cols: Int, rows: Int)?
 
-    init(host: Host, identity: Identity?) {
+    init(host: Host, identity: Identity?, persistenceKey: String? = nil) {
         self.host = host
         self.identity = identity
+        self.persistenceKey = persistenceKey ?? "host:\(host.id.uuidString)"
         super.init()
         terminalView.terminalDelegate = self
         let configuredSize = UserDefaults.standard.double(forKey: "dev.termvault.settings.fontSize")
@@ -56,6 +81,20 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             ofSize: configuredSize == 0 ? 14 : configuredSize,
             weight: .regular
         )
+    }
+
+    var displayTitle: String {
+        if let customTitle, !customTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return customTitle
+        }
+        guard let workspace = activeWorkspace else { return host.label }
+        return "\(workspace.displayName) · \(workspace.tool.title)"
+    }
+
+    func scrollToLatestOutput() {
+        let maximumY = max(0, terminalView.contentSize.height - terminalView.bounds.height)
+        terminalView.setContentOffset(CGPoint(x: terminalView.contentOffset.x, y: maximumY), animated: true)
+        isViewingHistory = false
     }
 
     func connect() async {
@@ -80,6 +119,18 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             )
             status = .connected
 
+            // The first SwiftTerm layout often happens while the SSH PTY is
+            // still being created. Re-send the measured viewport after the
+            // writer is ready so reconnects and existing tmux sessions also
+            // adopt the visible width instead of remaining at 80 columns.
+            if let terminalSize {
+                try? await SSHSessionManager.shared.resize(
+                    connectionID: id,
+                    cols: terminalSize.cols,
+                    rows: terminalSize.rows
+                )
+            }
+
             if let snippet = host.startupSnippet, !snippet.isEmpty {
                 try? await send(snippet + "\n")
             }
@@ -99,6 +150,65 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// through the `TerminalViewDelegate.send` keystroke path below.
     func sendRawBytes(_ bytes: [UInt8]) {
         enqueueInput(bytes)
+    }
+
+    /// Uploads files over the existing SSH connection and returns paths that
+    /// the remote AI CLI can read. Files live beside the active workspace
+    /// when possible, or in /tmp for a host-only shell session.
+    func uploadAttachments(_ urls: [URL]) async throws -> [String] {
+        let maximumFiles = 10
+        let maximumBytes: Int64 = 50 * 1_048_576
+        guard urls.count <= maximumFiles else { throw TerminalAttachmentError.tooManyFiles(maximumFiles) }
+        for url in urls {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            if Int64(values.fileSize ?? 0) > maximumBytes {
+                throw TerminalAttachmentError.fileTooLarge(url.lastPathComponent, maximumBytes)
+            }
+        }
+        guard status == .connected,
+              let sshClient = await SSHSessionManager.shared.session(for: id) else {
+            throw TerminalAttachmentError.notConnected
+        }
+        let basePath = activeWorkspace?.path ?? "/tmp"
+        let directory = (basePath as NSString).appendingPathComponent(".termvault-attachments")
+        _ = try await RemoteCommandService.shared.run(
+            hostID: host.id,
+            command: "mkdir -p -- \(Self.shellQuote(directory)); find \(Self.shellQuote(directory)) -type f -mtime +7 -delete 2>/dev/null || true"
+        )
+
+        var remotePaths: [String] = []
+        defer { attachmentUploadProgress = nil }
+        for (index, url) in urls.enumerated() {
+            attachmentUploadProgress = "Uploading \(index + 1) of \(urls.count): \(url.lastPathComponent)"
+            let safeName = Self.safeAttachmentName(url.lastPathComponent)
+            let uniqueName = "\(UUID().uuidString.prefix(8))-\(safeName)"
+            let remotePath = (directory as NSString).appendingPathComponent(uniqueName)
+            try await SFTPService.shared.upload(
+                hostID: id,
+                sshClient: sshClient,
+                localURL: url,
+                remotePath: remotePath
+            )
+            remotePaths.append(remotePath)
+        }
+        return remotePaths
+    }
+
+    func insertAttachmentReferences(_ paths: [String]) {
+        guard !paths.isEmpty else { return }
+        let references = paths.map(Self.shellQuote).joined(separator: " ")
+        let insertion: String
+        switch activeWorkspace?.tool {
+        case .codex:
+            insertion = "Inspect and use these local files as context: \(references). "
+        case .claude:
+            insertion = "Read these files before answering: \(references). "
+        case .hermes:
+            insertion = "Use the following file context: \(references). "
+        case .shell, .none:
+            insertion = references + " "
+        }
+        sendRawBytes(Array(insertion.utf8))
     }
 
     func attach(to workspace: WorkspaceSession) async {
@@ -152,6 +262,13 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func safeAttachmentName(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_"))
+        let sanitized = value.unicodeScalars.map { allowed.contains($0) ? Character(String($0)) : "_" }
+        let result = String(sanitized)
+        return result.isEmpty ? "attachment" : result
     }
 
     private static func isValidEnvironmentName(_ value: String) -> Bool {
@@ -220,6 +337,8 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     func disconnect() {
         inputDrainTask?.cancel()
         inputDrainTask = nil
+        resizeTask?.cancel()
+        resizeTask = nil
         pendingInput.removeAll(keepingCapacity: true)
         attachedTmuxName = nil
         let connectionID = id
@@ -313,6 +432,8 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         }
         inputDrainTask?.cancel()
         inputDrainTask = nil
+        resizeTask?.cancel()
+        resizeTask = nil
         pendingInput.removeAll(keepingCapacity: true)
         responseStartedAt = nil
         attachedTmuxName = nil
@@ -344,11 +465,28 @@ extension TerminalViewModel: TerminalViewDelegate {
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        terminalSize = (newCols, newRows)
         let connectionID = id
-        Task { try? await SSHSessionManager.shared.resize(connectionID: connectionID, cols: newCols, rows: newRows) }
+        // SwiftUI produces several intermediate heights while the software
+        // keyboard animates. Sending every frame to tmux makes it repeatedly
+        // reflow its history and visibly pushes the prompt upward. Apply only
+        // the settled viewport size.
+        resizeTask?.cancel()
+        resizeTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            try? await SSHSessionManager.shared.resize(
+                connectionID: connectionID,
+                cols: newCols,
+                rows: newRows
+            )
+        }
     }
 
-    func scrolled(source: TerminalView, position: Double) {}
+    func scrolled(source: TerminalView, position: Double) {
+        let visibleBottom = source.contentOffset.y + source.bounds.height
+        isViewingHistory = visibleBottom < source.contentSize.height - 20
+    }
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
     func bell(source: TerminalView) {}

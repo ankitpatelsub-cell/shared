@@ -31,9 +31,12 @@ struct SessionsTabView: View {
                     }
                 }
             }
-            .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Sessions")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
                 if horizontalSizeClass == .regular && sessionStore.sessions.count > 1 {
                     Menu {
                         Button("Single Terminal") { splitSessionID = nil }
@@ -49,6 +52,10 @@ struct SessionsTabView: View {
                     }
                 }
             }
+            // An active session already has its own compact host/status bar.
+            // Remove the otherwise redundant 44-point navigation heading to
+            // leave another terminal row visible above the keyboard.
+            .toolbar(sessionStore.sessions.isEmpty ? .visible : .hidden, for: .navigationBar)
         }
     }
 
@@ -60,6 +67,5 @@ struct SessionsTabView: View {
                         }
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
-        .ignoresSafeArea(edges: .bottom)
     }
 }

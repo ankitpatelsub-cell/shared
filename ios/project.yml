@@ -77,9 +77,23 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSFaceIDUsageDescription: "TermVault uses Face ID to lock the app and protect your saved hosts, passwords, and SSH keys."
+        NSPhotoLibraryUsageDescription: "TermVault lets you select photos to upload as context for an AI terminal session."
         UIFileSharingEnabled: false
         LSSupportsOpeningDocumentsInPlace: false
         ITSAppUsesNonExemptEncryption: false
+
+  TermVaultTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: TermVault
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.termvault.tests
+        SWIFT_VERSION: "5.9"
 
 schemes:
   TermVault:
@@ -90,3 +104,6 @@ schemes:
       config: Debug
     archive:
       config: Release
+    test:
+      targets:
+        - TermVaultTests

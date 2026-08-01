@@ -2,9 +2,13 @@ import SwiftUI
 
 struct RootTabView: View {
     @EnvironmentObject private var navigationStore: AppNavigationStore
+    @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
 
     var body: some View {
-        TabView(selection: $navigationStore.selectedTab) {
+        TabView(selection: Binding(
+            get: { navigationStore.selectedTab },
+            set: { navigationStore.navigate(to: $0) }
+        )) {
             HostListView()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
                 .tag(RootTab.hosts)
@@ -25,5 +29,6 @@ struct RootTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(RootTab.settings)
         }
+        .tint(Theme.accentColor(for: accent))
     }
 }

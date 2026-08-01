@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct TermVaultApp: App {
+    @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
     @StateObject private var lockService = BiometricLockService()
     @StateObject private var sessionStore = SessionStore()
     @StateObject private var workspaceStore = WorkspaceStore()
@@ -37,6 +38,7 @@ struct TermVaultApp: App {
                 }
             }
             .animation(.default, value: lockService.isUnlocked)
+            .preferredColorScheme(preferredColorScheme)
             .task {
                 await lockService.authenticateIfNeeded()
             }
@@ -47,5 +49,13 @@ struct TermVaultApp: App {
             }
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
     }
 }
