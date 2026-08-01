@@ -54,8 +54,8 @@ struct ExtraKeysAccessoryView: View {
                 if extendedKeys {
                     keyButton("Home") { sendCSI("H") }
                     keyButton("End") { sendCSI("F") }
-                    keyButton("PgUp") { sendCSI("5~") }
-                    keyButton("PgDn") { sendCSI("6~") }
+                    keyButton("PgUp") { viewModel.scrollPage(-1) }
+                    keyButton("PgDn") { viewModel.scrollPage(1) }
                     keyButton("Del") { sendCSI("3~") }
                     keyButton("F1") { viewModel.sendRawBytes(Array("\u{1B}OP".utf8)) }
                 }

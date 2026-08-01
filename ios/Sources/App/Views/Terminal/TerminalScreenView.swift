@@ -68,7 +68,7 @@ struct TerminalScreenView: View {
         .task {
             applyFontSize()
             if viewModel.status == .disconnected {
-                await viewModel.connect()
+                await viewModel.reconnect()
             }
         }
         .onChange(of: fontSize) { _, _ in applyFontSize() }
@@ -184,7 +184,7 @@ struct TerminalScreenView: View {
                     Label(viewModel.isPinned ? "Unpin Session" : "Pin Session", systemImage: "pin")
                 }
                 if canReconnect {
-                    Button { Task { await viewModel.connect() } } label: {
+                    Button { Task { await viewModel.reconnect() } } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                     }
                 }

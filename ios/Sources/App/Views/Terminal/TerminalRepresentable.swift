@@ -8,8 +8,23 @@ struct TerminalRepresentable: UIViewRepresentable {
     let terminalView: TerminalView
 
     func makeUIView(context: Context) -> TerminalView {
-        terminalView
+        configureScrolling(terminalView)
+        return terminalView
     }
 
-    func updateUIView(_ uiView: TerminalView, context: Context) {}
+    func updateUIView(_ uiView: TerminalView, context: Context) {
+        configureScrolling(uiView)
+    }
+
+    private func configureScrolling(_ view: TerminalView) {
+        // TerminalView is a UIScrollView subclass. Keep local scrollback
+        // available even when a full-screen remote TUI is handling keys.
+        view.isScrollEnabled = true
+        view.alwaysBounceVertical = true
+        view.alwaysBounceHorizontal = false
+        view.showsVerticalScrollIndicator = true
+        view.isDirectionalLockEnabled = true
+        view.keyboardDismissMode = .interactive
+        view.panGestureRecognizer.minimumNumberOfTouches = 1
+    }
 }

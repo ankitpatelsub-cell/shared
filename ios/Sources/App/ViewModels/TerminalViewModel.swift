@@ -97,6 +97,17 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         isViewingHistory = false
     }
 
+    func scrollPage(_ direction: Int) {
+        let maximumY = max(0, terminalView.contentSize.height - terminalView.bounds.height)
+        let page = max(44, terminalView.bounds.height * 0.8)
+        let targetY = min(maximumY, max(0, terminalView.contentOffset.y + CGFloat(direction) * page))
+        terminalView.setContentOffset(
+            CGPoint(x: terminalView.contentOffset.x, y: targetY),
+            animated: true
+        )
+        isViewingHistory = targetY < maximumY - 20
+    }
+
     func connect() async {
         guard status != .connecting, status != .connected else { return }
         status = .connecting
@@ -136,6 +147,18 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             }
         } catch {
             status = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Restores the logical session, not merely the SSH transport. Workspace
+    /// terminals must reattach their tmux session after a dropped connection;
+    /// otherwise reconnect leaves the user at the host's home-directory shell.
+    func reconnect() async {
+        if let workspace = activeWorkspace {
+            attachedTmuxName = nil
+            await attach(to: workspace)
+        } else {
+            await connect()
         }
     }
 
