@@ -7,6 +7,7 @@ enum SSHConnectionError: Error, LocalizedError {
     case noAuthenticationConfigured
     case rsaPrivateKeyAuthUnsupported
     case notConnected
+    case terminalSetupTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +17,8 @@ enum SSHConnectionError: Error, LocalizedError {
             return "RSA key auth isn't supported: Citadel's Insecure.RSA.PrivateKey has no PEM/DER import initializer in its public API (only a raw-BoringSSL-BIGNUM constructor and an internal generator). Use an Ed25519 identity instead — Citadel supports that fully via .ed25519(username:privateKey:)."
         case .notConnected:
             return "Not connected."
+        case .terminalSetupTimedOut:
+            return "Terminal setup timed out. Tap reconnect to try again."
         }
     }
 }
@@ -94,6 +97,19 @@ actor SSHSessionManager {
             await self.disconnect(hostID: hostID)
             onClose()
         }
+
+        // A TCP/SSH connection is not yet an interactive terminal. Do not
+        // return (and let the UI advertise "Connected") until withPTY has
+        // supplied the writer that can actually accept keystrokes.
+        let setupDeadline = Date().addingTimeInterval(15)
+        while writers[hostID] == nil, clients[hostID] != nil, Date() < setupDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        if writers[hostID] == nil, clients[hostID] != nil {
+            await disconnect(hostID: hostID)
+            throw SSHConnectionError.terminalSetupTimedOut
+        }
+        guard writers[hostID] != nil else { throw SSHConnectionError.notConnected }
     }
 
     private func storeWriter(_ writer: TTYStdinWriter, forHostID hostID: UUID) {
@@ -101,8 +117,12 @@ actor SSHSessionManager {
     }
 
     func send(_ text: String, hostID: UUID) async throws {
+        try await send(Array(text.utf8), hostID: hostID)
+    }
+
+    func send(_ bytes: [UInt8], hostID: UUID) async throws {
         guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
-        try await writer.write(ByteBuffer(string: text))
+        try await writer.write(ByteBuffer(bytes: bytes))
     }
 
     func resize(hostID: UUID, cols: Int, rows: Int) async throws {

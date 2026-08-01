@@ -40,6 +40,12 @@ struct TerminalScreenView: View {
 
             Spacer(minLength: 8)
 
+            if canReconnect {
+                topBarButton("arrow.clockwise") {
+                    Task { await viewModel.connect() }
+                }
+                .accessibilityLabel("Reconnect")
+            }
             topBarButton("folder") { showingSFTP = true }
             topBarButton("xmark") { sessionStore.close(viewModel) }
         }
@@ -77,10 +83,21 @@ struct TerminalScreenView: View {
 
     private var statusLabel: String {
         switch viewModel.status {
-        case .connected: return "Connected"
+        case .connected:
+            if let latency = viewModel.responseLatencyMilliseconds {
+                return "Connected · \(latency) ms"
+            }
+            return "Connected"
         case .connecting: return "Connecting…"
         case .disconnected: return "Disconnected"
         case .failed(let message): return message
+        }
+    }
+
+    private var canReconnect: Bool {
+        switch viewModel.status {
+        case .disconnected, .failed: return true
+        case .connecting, .connected: return false
         }
     }
 }

@@ -30,7 +30,17 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     let terminalView = TerminalView(frame: .zero)
 
     @Published private(set) var status: ConnectionStatus = .disconnected
+    @Published private(set) var responseLatencyMilliseconds: Int?
     @Published var pendingModifier: TerminalModifier?
+
+    // SwiftTerm can emit several small delegate callbacks during a fast typing
+    // burst. Keep one ordered drain alive instead of creating an unstructured
+    // task (and SSH write) for every callback.
+    private var pendingInput: [UInt8] = []
+    private var inputDrainTask: Task<Void, Never>?
+    private var pendingOutput: [UInt8] = []
+    private var outputFlushTask: Task<Void, Never>?
+    private var responseStartedAt: Date?
 
     init(host: Host, identity: Identity?) {
         self.host = host
@@ -40,19 +50,21 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     }
 
     func connect() async {
+        guard status != .connecting, status != .connected else { return }
         status = .connecting
+        responseLatencyMilliseconds = nil
         do {
             try await SSHSessionManager.shared.connect(
                 host: host,
                 identity: identity,
                 onOutput: { [weak self] data in
                     Task { @MainActor in
-                        self?.terminalView.feed(byteArray: Array(data)[...])
+                        self?.receiveRemoteOutput(data)
                     }
                 },
                 onClose: { [weak self] in
                     Task { @MainActor in
-                        self?.status = .disconnected
+                        self?.handleConnectionClosed()
                     }
                 }
             )
@@ -76,8 +88,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// deliberately bypass `pendingModifier` entirely rather than routing
     /// through the `TerminalViewDelegate.send` keystroke path below.
     func sendRawBytes(_ bytes: [UInt8]) {
-        let text = String(decoding: bytes, as: UTF8.self)
-        Task { try? await send(text) }
+        enqueueInput(bytes)
     }
 
     /// Sends a Ctrl-chord immediately, independent of the toggle in the
@@ -136,17 +147,91 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     }
 
     func disconnect() {
+        inputDrainTask?.cancel()
+        inputDrainTask = nil
+        pendingInput.removeAll(keepingCapacity: true)
         let hostID = host.id
         Task { await SSHSessionManager.shared.disconnect(hostID: hostID) }
         status = .disconnected
+    }
+
+    /// Preserve keystroke ordering and coalesce any input that arrives while
+    /// the previous network write is in flight.
+    private func enqueueInput(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty, status == .connected else { return }
+        pendingInput.append(contentsOf: bytes)
+        guard inputDrainTask == nil else { return }
+
+        inputDrainTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                guard !self.pendingInput.isEmpty else {
+                    self.inputDrainTask = nil
+                    return
+                }
+
+                let bytes = self.pendingInput
+                self.pendingInput.removeAll(keepingCapacity: true)
+                do {
+                    if self.responseStartedAt == nil {
+                        self.responseStartedAt = Date()
+                    }
+                    try await SSHSessionManager.shared.send(bytes, hostID: self.host.id)
+                } catch {
+                    self.pendingInput.removeAll(keepingCapacity: true)
+                    self.inputDrainTask = nil
+                    self.status = .disconnected
+                    await SSHSessionManager.shared.disconnect(hostID: self.host.id)
+                    return
+                }
+            }
+        }
+    }
+
+    /// Network reads can arrive as many tiny SSH packets. Feed SwiftTerm once
+    /// per main-actor turn so output-heavy commands do less layout work and
+    /// keyboard handling remains responsive.
+    private func receiveRemoteOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        if let startedAt = responseStartedAt {
+            responseLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+            responseStartedAt = nil
+        }
+
+        pendingOutput.append(contentsOf: data)
+        guard outputFlushTask == nil else { return }
+        outputFlushTask = Task { [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            let bytes = self.pendingOutput
+            self.pendingOutput.removeAll(keepingCapacity: true)
+            self.outputFlushTask = nil
+            guard !bytes.isEmpty else { return }
+            self.terminalView.feed(byteArray: bytes[...])
+        }
+    }
+
+    private func handleConnectionClosed() {
+        let preserveFailure: Bool
+        if case .failed = status {
+            preserveFailure = true
+        } else {
+            preserveFailure = false
+        }
+        inputDrainTask?.cancel()
+        inputDrainTask = nil
+        pendingInput.removeAll(keepingCapacity: true)
+        responseStartedAt = nil
+        if !preserveFailure {
+            status = .disconnected
+        }
     }
 }
 
 extension TerminalViewModel: TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = applyPendingModifier(to: Array(data))
-        let text = String(decoding: bytes, as: UTF8.self)
-        Task { try? await send(text) }
+        enqueueInput(bytes)
     }
 
     func setTerminalTitle(source: TerminalView, title: String) {}
