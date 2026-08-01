@@ -25,7 +25,7 @@ struct SettingsView: View {
                         .onChange(of: agentNotifications) { _, enabled in
                             if enabled {
                                 Task {
-                                    if !await NotificationService.requestAuthorization() {
+                                    if !(await NotificationService.requestAuthorization()) {
                                         agentNotifications = false
                                     }
                                 }
