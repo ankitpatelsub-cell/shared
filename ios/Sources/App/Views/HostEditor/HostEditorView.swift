@@ -5,6 +5,7 @@ struct HostEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var identities: [Identity]
+    @Query(sort: \Host.label) private var hosts: [Host]
 
     let host: Host?
 
@@ -15,6 +16,7 @@ struct HostEditorView: View {
     @State private var authMethod: HostAuthMethod = .password
     @State private var password = ""
     @State private var selectedIdentityID: UUID?
+    @State private var selectedJumpHostID: UUID?
     @State private var startupSnippet = ""
     @State private var groupName = ""
     @State private var themeName = ""
@@ -62,6 +64,17 @@ struct HostEditorView: View {
                     TextField("Command to run on connect (optional)", text: $startupSnippet, axis: .vertical)
                 }
 
+                Section("Network") {
+                    Picker("Jump Host", selection: $selectedJumpHostID) {
+                        Text("Direct Connection").tag(UUID?.none)
+                        ForEach(hosts.filter { $0.id != host?.id }) { candidate in
+                            Text(candidate.label).tag(Optional(candidate.id))
+                        }
+                    }
+                    Text("Connect through a saved bastion host using an SSH host chain.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Appearance") {
                     TextField("Theme override (optional)", text: $themeName)
                 }
@@ -96,6 +109,7 @@ struct HostEditorView: View {
         username = host.username
         authMethod = host.authMethod
         selectedIdentityID = host.identityID
+        selectedJumpHostID = host.jumpHostID
         startupSnippet = host.startupSnippet ?? ""
         groupName = host.groupName ?? ""
         themeName = host.themeName ?? ""
@@ -117,6 +131,7 @@ struct HostEditorView: View {
         target.username = username
         target.authMethod = authMethod
         target.identityID = authMethod == .privateKey ? selectedIdentityID : nil
+        target.jumpHostID = selectedJumpHostID
         target.startupSnippet = startupSnippet.isEmpty ? nil : startupSnippet
         target.groupName = groupName.isEmpty ? nil : groupName
         target.themeName = themeName.isEmpty ? nil : themeName

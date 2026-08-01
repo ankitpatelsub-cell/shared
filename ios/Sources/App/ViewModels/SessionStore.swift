@@ -7,6 +7,14 @@ import Foundation
 final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [TerminalViewModel] = []
     @Published var activeSessionID: UUID?
+    var connectionSnippetCommands: [String] = []
+    private var connectionHosts: [Host] = []
+    private var connectionIdentities: [Identity] = []
+
+    func configureConnectionCatalog(hosts: [Host], identities: [Identity]) {
+        connectionHosts = hosts
+        connectionIdentities = identities
+    }
     private let preferencesKey = "dev.termvault.sessionPreferences"
 
     private struct SessionPreference: Codable {
@@ -21,7 +29,10 @@ final class SessionStore: ObservableObject {
             activeSessionID = existing.id
             return existing
         }
-        let viewModel = TerminalViewModel(host: host, identity: identity)
+        let jumpHost = connectionHosts.first { $0.id == host.jumpHostID }
+        let jumpIdentity = connectionIdentities.first { $0.id == jumpHost?.identityID }
+        let viewModel = TerminalViewModel(host: host, identity: identity, jumpHost: jumpHost, jumpIdentity: jumpIdentity)
+        viewModel.connectionSnippetCommands = connectionSnippetCommands
         applyPreference(to: viewModel)
         sessions.append(viewModel)
         sortSessions()
@@ -39,8 +50,13 @@ final class SessionStore: ObservableObject {
         let viewModel = TerminalViewModel(
             host: host,
             identity: identity,
+            jumpHost: connectionHosts.first { $0.id == host.jumpHostID },
+            jumpIdentity: connectionIdentities.first { identity in
+                identity.id == connectionHosts.first { $0.id == host.jumpHostID }?.identityID
+            },
             persistenceKey: "workspace:\(workspace.id.uuidString)"
         )
+        viewModel.connectionSnippetCommands = connectionSnippetCommands
         applyPreference(to: viewModel)
         sessions.append(viewModel)
         sortSessions()
@@ -50,6 +66,7 @@ final class SessionStore: ObservableObject {
     }
 
     func close(_ session: TerminalViewModel) {
+        SessionHistoryStore.shared.record(session)
         session.disconnect()
         sessions.removeAll { $0.id == session.id }
         if activeSessionID == session.id {

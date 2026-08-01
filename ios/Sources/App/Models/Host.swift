@@ -27,6 +27,7 @@ final class Host {
     var authMethodRaw: String
     /// Foreign key into the Identity store. Nil unless authMethod == .privateKey.
     var identityID: UUID?
+    var jumpHostID: UUID?
     var startupSnippet: String?
     var groupName: String?
     var tags: [String]
@@ -46,6 +47,7 @@ final class Host {
         username: String,
         authMethod: HostAuthMethod = .password,
         identityID: UUID? = nil,
+        jumpHostID: UUID? = nil,
         startupSnippet: String? = nil,
         groupName: String? = nil,
         tags: [String] = [],
@@ -58,6 +60,7 @@ final class Host {
         self.username = username
         self.authMethodRaw = authMethod.rawValue
         self.identityID = identityID
+        self.jumpHostID = jumpHostID
         self.startupSnippet = startupSnippet
         self.groupName = groupName
         self.tags = tags

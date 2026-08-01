@@ -40,6 +40,7 @@ struct SettingsView: View {
                 }
                 Section("Agents") {
                     NavigationLink("Agent Presets") { AgentPresetsView() }
+                    NavigationLink("Command Snippets") { SnippetLibraryView() }
                     Toggle("Completion Notifications", isOn: $agentNotifications)
                         .onChange(of: agentNotifications) { _, enabled in
                             if enabled {
@@ -51,7 +52,15 @@ struct SettingsView: View {
                             }
                         }
                 }
+                Section("Activity") {
+                    NavigationLink("Session History") { SessionHistoryView() }
+                }
                 Section("Integrations") {
+                    NavigationLink {
+                        SSHConfigView()
+                    } label: {
+                        Label("SSH Config Import / Export", systemImage: "doc.text")
+                    }
                     NavigationLink {
                         GitHubSettingsView()
                     } label: {

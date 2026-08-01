@@ -101,6 +101,7 @@ struct HostListView: View {
             username: host.username,
             authMethod: host.authMethod,
             identityID: host.identityID,
+            jumpHostID: host.jumpHostID,
             startupSnippet: host.startupSnippet,
             groupName: host.groupName,
             tags: host.tags,

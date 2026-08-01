@@ -1,9 +1,11 @@
 import SwiftUI
+import SwiftData
 import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
 struct TerminalScreenView: View {
+    @Query(sort: \Snippet.name) private var snippets: [Snippet]
     @ObservedObject var viewModel: TerminalViewModel
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var navigationStore: AppNavigationStore
@@ -165,6 +167,15 @@ struct TerminalScreenView: View {
                 Divider()
                 Button { showingTranscript = true } label: {
                     Label("Search Output", systemImage: "doc.text.magnifyingglass")
+                }
+                if !snippets.isEmpty {
+                    Menu("Insert Snippet") {
+                        ForEach(snippets) { snippet in
+                            Button(snippet.name) {
+                                viewModel.sendRawBytes(Array(snippet.command.utf8))
+                            }
+                        }
+                    }
                 }
                 Button { showingFileImporter = true } label: {
                     Label("Attach File", systemImage: "paperclip")

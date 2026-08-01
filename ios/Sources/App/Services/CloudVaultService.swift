@@ -18,7 +18,7 @@ enum CloudVaultError: Error, LocalizedError {
 
 private struct HostVaultRecord: Codable {
     var id: UUID; var label: String; var address: String; var port: Int; var username: String
-    var authMethod: HostAuthMethod; var identityID: UUID?; var startupSnippet: String?
+    var authMethod: HostAuthMethod; var identityID: UUID?; var jumpHostID: UUID?; var startupSnippet: String?
     var groupName: String?; var tags: [String]; var themeName: String?; var password: String?
 }
 
@@ -64,7 +64,7 @@ final class CloudVaultService {
             hosts: hosts.map { host in
                 HostVaultRecord(
                     id: host.id, label: host.label, address: host.address, port: host.port,
-                    username: host.username, authMethod: host.authMethod, identityID: host.identityID,
+                    username: host.username, authMethod: host.authMethod, identityID: host.identityID, jumpHostID: host.jumpHostID,
                     startupSnippet: host.startupSnippet, groupName: host.groupName, tags: host.tags,
                     themeName: host.themeName, password: try? KeychainService.password(for: host)
                 )
@@ -123,6 +123,7 @@ final class CloudVaultService {
             value.label = record.label; value.address = record.address; value.port = record.port
             value.username = record.username; value.authMethod = record.authMethod
             value.identityID = record.identityID; value.startupSnippet = record.startupSnippet
+            value.jumpHostID = record.jumpHostID
             value.groupName = record.groupName; value.tags = record.tags; value.themeName = record.themeName
             if !existingHosts.contains(where: { $0.id == record.id }) { context.insert(value) }
             if let password = record.password { try KeychainService.setPassword(password, for: value) }

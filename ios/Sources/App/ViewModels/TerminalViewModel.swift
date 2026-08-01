@@ -44,8 +44,11 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     let host: Host
     let identity: Identity?
+    let jumpHost: Host?
+    let jumpIdentity: Identity?
     let terminalView = TerminalView(frame: .zero)
     let persistenceKey: String
+    let startedAt = Date()
 
     @Published private(set) var status: ConnectionStatus = .disconnected
     @Published private(set) var responseLatencyMilliseconds: Int?
@@ -57,6 +60,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published var isPinned = false
     @Published private(set) var isViewingHistory = false
     @Published private(set) var attachmentUploadProgress: String?
+    var connectionSnippetCommands: [String] = []
 
     // SwiftTerm can emit several small delegate callbacks during a fast typing
     // burst. Keep one ordered drain alive instead of creating an unstructured
@@ -70,9 +74,14 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     private var attachedTmuxName: String?
     private var terminalSize: (cols: Int, rows: Int)?
 
-    init(host: Host, identity: Identity?, persistenceKey: String? = nil) {
+    init(
+        host: Host, identity: Identity?, jumpHost: Host? = nil,
+        jumpIdentity: Identity? = nil, persistenceKey: String? = nil
+    ) {
         self.host = host
         self.identity = identity
+        self.jumpHost = jumpHost
+        self.jumpIdentity = jumpIdentity
         self.persistenceKey = persistenceKey ?? "host:\(host.id.uuidString)"
         super.init()
         terminalView.terminalDelegate = self
@@ -117,6 +126,8 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                 connectionID: id,
                 host: host,
                 identity: identity,
+                jumpHost: jumpHost,
+                jumpIdentity: jumpIdentity,
                 onOutput: { [weak self] data in
                     Task { @MainActor in
                         self?.receiveRemoteOutput(data)
@@ -144,6 +155,9 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
             if let snippet = host.startupSnippet, !snippet.isEmpty {
                 try? await send(snippet + "\n")
+            }
+            for command in connectionSnippetCommands where !command.isEmpty {
+                try? await send(command + "\n")
             }
         } catch {
             status = .failed(error.localizedDescription)

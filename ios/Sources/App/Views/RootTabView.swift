@@ -1,7 +1,12 @@
 import SwiftUI
+import SwiftData
 
 struct RootTabView: View {
     @EnvironmentObject private var navigationStore: AppNavigationStore
+    @EnvironmentObject private var sessionStore: SessionStore
+    @Query private var snippets: [Snippet]
+    @Query private var hosts: [Host]
+    @Query private var identities: [Identity]
     @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
 
     var body: some View {
@@ -30,5 +35,11 @@ struct RootTabView: View {
                 .tag(RootTab.settings)
         }
         .tint(Theme.accentColor(for: accent))
+        .task(id: snippets.map { "\($0.id):\($0.runOnConnect):\($0.command)" }.joined()) {
+            sessionStore.connectionSnippetCommands = snippets.filter { $0.runOnConnect }.map(\.command)
+        }
+        .task(id: hosts.map(\.id).map(\.uuidString).joined() + identities.map(\.id).map(\.uuidString).joined()) {
+            sessionStore.configureConnectionCatalog(hosts: hosts, identities: identities)
+        }
     }
 }

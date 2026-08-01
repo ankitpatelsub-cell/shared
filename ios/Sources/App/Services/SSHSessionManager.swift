@@ -38,6 +38,7 @@ actor SSHSessionManager {
     static let shared = SSHSessionManager()
 
     private var clients: [UUID: SSHClient] = [:]
+    private var jumpClients: [UUID: SSHClient] = [:]
     private var hostIDs: [UUID: UUID] = [:]
     private var writers: [UUID: TTYStdinWriter] = [:]
     // SwiftTerm commonly reports its real viewport before `withPTY` has
@@ -63,6 +64,8 @@ actor SSHSessionManager {
         connectionID: UUID,
         host: Host,
         identity: Identity?,
+        jumpHost: Host? = nil,
+        jumpIdentity: Identity? = nil,
         onOutput: @escaping @Sendable (Data) -> Void,
         onClose: @escaping @Sendable () -> Void
     ) async throws {
@@ -76,7 +79,26 @@ actor SSHSessionManager {
             hostKeyValidator: .custom(TOFUHostKeyValidator(host: host.address, port: host.port))
         )
 
-        let client = try await SSHClient.connect(to: settings)
+        let client: SSHClient
+        if let jumpHost {
+            let jumpAuthMethod = try makeAuthenticationMethod(host: jumpHost, identity: jumpIdentity)
+            let jumpSettings = SSHClientSettings(
+                host: jumpHost.address,
+                port: jumpHost.port,
+                authenticationMethod: { jumpAuthMethod },
+                hostKeyValidator: .custom(TOFUHostKeyValidator(host: jumpHost.address, port: jumpHost.port))
+            )
+            let jumpClient = try await SSHClient.connect(to: jumpSettings)
+            do {
+                client = try await jumpClient.jump(to: settings)
+                jumpClients[connectionID] = jumpClient
+            } catch {
+                try? await jumpClient.close()
+                throw error
+            }
+        } else {
+            client = try await SSHClient.connect(to: settings)
+        }
         clients[connectionID] = client
         hostIDs[connectionID] = host.id
 
@@ -162,6 +184,9 @@ actor SSHSessionManager {
         if let client = clients[connectionID] {
             clients[connectionID] = nil
             try? await client.close()
+        }
+        if let jumpClient = jumpClients.removeValue(forKey: connectionID) {
+            try? await jumpClient.close()
         }
     }
 
