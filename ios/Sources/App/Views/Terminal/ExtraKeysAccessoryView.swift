@@ -24,6 +24,7 @@ struct ExtraKeysAccessoryView: View {
     @ObservedObject var viewModel: TerminalViewModel
     @State private var showingShortcuts = false
     @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
+    @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
 
     private var terminalView: TerminalView { viewModel.terminalView }
 
@@ -35,12 +36,13 @@ struct ExtraKeysAccessoryView: View {
                 toggleButton("ctrl", modifier: .ctrl)
                 toggleButton("alt", modifier: .alt)
 
-                divider
-
-                keyButton("~") { sendText("~") }
-                keyButton("/") { sendText("/") }
-                keyButton("|") { sendText("|") }
-                keyButton("-") { sendText("-") }
+                if keyRowLayout != "compact" {
+                    divider
+                    keyButton("~") { sendText("~") }
+                    keyButton("/") { sendText("/") }
+                    keyButton("|") { sendText("|") }
+                    keyButton("-") { sendText("-") }
+                }
 
                 divider
 
@@ -51,7 +53,7 @@ struct ExtraKeysAccessoryView: View {
 
                 divider
 
-                if extendedKeys {
+                if extendedKeys && keyRowLayout == "full" {
                     keyButton("Home") { sendCSI("H") }
                     keyButton("End") { sendCSI("F") }
                     keyButton("PgUp") { viewModel.scrollPage(-1) }

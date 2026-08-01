@@ -19,6 +19,7 @@ struct HostEditorView: View {
     @State private var selectedJumpHostID: UUID?
     @State private var startupSnippet = ""
     @State private var groupName = ""
+    @State private var tagsText = ""
     @State private var themeName = ""
     @State private var errorMessage: String?
 
@@ -40,6 +41,7 @@ struct HostEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     TextField("Group (optional)", text: $groupName)
+                    TextField("Tags (comma separated)", text: $tagsText)
                 }
 
                 Section("Auth") {
@@ -112,6 +114,7 @@ struct HostEditorView: View {
         selectedJumpHostID = host.jumpHostID
         startupSnippet = host.startupSnippet ?? ""
         groupName = host.groupName ?? ""
+        tagsText = host.tags.joined(separator: ", ")
         themeName = host.themeName ?? ""
         password = (try? KeychainService.password(for: host)) ?? ""
     }
@@ -134,6 +137,9 @@ struct HostEditorView: View {
         target.jumpHostID = selectedJumpHostID
         target.startupSnippet = startupSnippet.isEmpty ? nil : startupSnippet
         target.groupName = groupName.isEmpty ? nil : groupName
+        target.tags = tagsText.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
         target.themeName = themeName.isEmpty ? nil : themeName
 
         if host == nil {

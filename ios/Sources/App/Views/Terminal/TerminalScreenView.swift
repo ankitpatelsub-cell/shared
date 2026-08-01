@@ -21,6 +21,8 @@ struct TerminalScreenView: View {
     @State private var isUploadingAttachments = false
     @State private var attachmentMessage: String?
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
+    @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
+    @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,11 +71,14 @@ struct TerminalScreenView: View {
         .toolbar(.hidden, for: .tabBar)
         .task {
             applyFontSize()
+            applyTerminalTheme()
             if viewModel.status == .disconnected {
                 await viewModel.reconnect()
             }
         }
         .onChange(of: fontSize) { _, _ in applyFontSize() }
+        .onChange(of: terminalFont) { _, _ in applyFontSize() }
+        .onChange(of: terminalTheme) { _, _ in applyTerminalTheme() }
         .onChange(of: selectedPhotos) { _, items in
             guard !items.isEmpty else { return }
             Task { await uploadPhotos(items) }
@@ -265,7 +270,24 @@ struct TerminalScreenView: View {
     }
 
     private func applyFontSize() {
-        viewModel.terminalView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        switch terminalFont {
+        case "menlo": viewModel.terminalView.font = UIFont(name: "Menlo-Regular", size: fontSize) ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        case "courier": viewModel.terminalView.font = UIFont(name: "Courier", size: fontSize) ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        default: viewModel.terminalView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
+    }
+
+    private func applyTerminalTheme() {
+        let colors: (foreground: String, background: String, uiBackground: UIColor)
+        switch terminalTheme {
+        case "solarized": colors = ("#839496", "#002b36", UIColor(red: 0, green: 0.17, blue: 0.21, alpha: 1))
+        case "dracula": colors = ("#f8f8f2", "#282a36", UIColor(red: 0.16, green: 0.16, blue: 0.21, alpha: 1))
+        case "paper": colors = ("#202124", "#f5f5f5", UIColor(white: 0.96, alpha: 1))
+        default: colors = ("#f2f2f2", "#000000", .black)
+        }
+        viewModel.terminalView.backgroundColor = colors.uiBackground
+        let sequence = "\u{1B}]10;\(colors.foreground)\u{07}\u{1B}]11;\(colors.background)\u{07}"
+        viewModel.terminalView.feed(byteArray: Array(sequence.utf8)[...])
     }
 
     private func uploadSecurityScopedFiles(_ urls: [URL]) async {

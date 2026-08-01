@@ -8,6 +8,9 @@ struct SettingsView: View {
     @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
     @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
     @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
+    @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
+    @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
+    @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
 
     var body: some View {
         NavigationStack {
@@ -34,6 +37,22 @@ struct SettingsView: View {
                     }
                     Toggle("Confirm Multiline Paste", isOn: $pasteProtection)
                     Toggle("Extended Key Row", isOn: $extendedKeys)
+                    Picker("Font", selection: $terminalFont) {
+                        Text("SF Mono").tag("system")
+                        Text("Menlo").tag("menlo")
+                        Text("Courier").tag("courier")
+                    }
+                    Picker("Color Theme", selection: $terminalTheme) {
+                        Text("Midnight").tag("midnight")
+                        Text("Solarized Dark").tag("solarized")
+                        Text("Dracula").tag("dracula")
+                        Text("Paper Light").tag("paper")
+                    }
+                    Picker("Keyboard Row", selection: $keyRowLayout) {
+                        Text("Compact").tag("compact")
+                        Text("Standard").tag("standard")
+                        Text("Full").tag("full")
+                    }
                     Text("Pinch directly on the terminal to change its font size.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -56,6 +75,11 @@ struct SettingsView: View {
                     NavigationLink("Session History") { SessionHistoryView() }
                 }
                 Section("Integrations") {
+                    NavigationLink {
+                        PortForwardingView()
+                    } label: {
+                        Label("Port Forwarding", systemImage: "arrow.left.arrow.right")
+                    }
                     NavigationLink {
                         SSHConfigView()
                     } label: {

@@ -41,6 +41,8 @@ targets:
         product: NIOSSH
       - package: SwiftNIO
         product: NIOCore
+      - package: SwiftNIO
+        product: NIOPosix
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.termvault.app
