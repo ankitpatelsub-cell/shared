@@ -38,24 +38,31 @@ actor SSHSessionManager {
     static let shared = SSHSessionManager()
 
     private var clients: [UUID: SSHClient] = [:]
+    private var hostIDs: [UUID: UUID] = [:]
     private var writers: [UUID: TTYStdinWriter] = [:]
     private var sessionTasks: [UUID: Task<Void, Never>] = [:]
 
-    func isConnected(hostID: UUID) -> Bool {
-        clients[hostID] != nil
+    func isConnected(connectionID: UUID) -> Bool {
+        clients[connectionID] != nil
     }
 
-    func session(for hostID: UUID) -> SSHClient? {
-        clients[hostID]
+    func session(for connectionID: UUID) -> SSHClient? {
+        clients[connectionID]
+    }
+
+    func session(forHostID hostID: UUID) -> SSHClient? {
+        guard let connectionID = hostIDs.first(where: { $0.value == hostID })?.key else { return nil }
+        return clients[connectionID]
     }
 
     func connect(
+        connectionID: UUID,
         host: Host,
         identity: Identity?,
         onOutput: @escaping @Sendable (Data) -> Void,
         onClose: @escaping @Sendable () -> Void
     ) async throws {
-        if clients[host.id] != nil { return }
+        if clients[connectionID] != nil { return }
 
         let authMethod = try makeAuthenticationMethod(host: host, identity: identity)
         let settings = SSHClientSettings(
@@ -66,10 +73,10 @@ actor SSHSessionManager {
         )
 
         let client = try await SSHClient.connect(to: settings)
-        clients[host.id] = client
+        clients[connectionID] = client
+        hostIDs[connectionID] = host.id
 
-        let hostID = host.id
-        sessionTasks[hostID] = Task {
+        sessionTasks[connectionID] = Task {
             do {
                 try await client.withPTY(
                     SSHChannelRequestEvent.PseudoTerminalRequest(
@@ -82,7 +89,7 @@ actor SSHSessionManager {
                         terminalModes: SSHTerminalModes([:])
                     )
                 ) { inbound, outbound in
-                    await self.storeWriter(outbound, forHostID: hostID)
+                    await self.storeWriter(outbound, forConnectionID: connectionID)
                     for try await chunk in inbound {
                         switch chunk {
                         case .stdout(let buffer), .stderr(let buffer):
@@ -94,7 +101,7 @@ actor SSHSessionManager {
                 // Falls through to teardown below regardless of whether the
                 // session ended cleanly (remote closed) or with an error.
             }
-            await self.disconnect(hostID: hostID)
+            await self.disconnect(connectionID: connectionID)
             onClose()
         }
 
@@ -102,47 +109,48 @@ actor SSHSessionManager {
         // return (and let the UI advertise "Connected") until withPTY has
         // supplied the writer that can actually accept keystrokes.
         let setupDeadline = Date().addingTimeInterval(15)
-        while writers[hostID] == nil, clients[hostID] != nil, Date() < setupDeadline {
+        while writers[connectionID] == nil, clients[connectionID] != nil, Date() < setupDeadline {
             try await Task.sleep(for: .milliseconds(5))
         }
-        if writers[hostID] == nil, clients[hostID] != nil {
-            await disconnect(hostID: hostID)
+        if writers[connectionID] == nil, clients[connectionID] != nil {
+            await disconnect(connectionID: connectionID)
             throw SSHConnectionError.terminalSetupTimedOut
         }
-        guard writers[hostID] != nil else { throw SSHConnectionError.notConnected }
+        guard writers[connectionID] != nil else { throw SSHConnectionError.notConnected }
     }
 
-    private func storeWriter(_ writer: TTYStdinWriter, forHostID hostID: UUID) {
-        writers[hostID] = writer
+    private func storeWriter(_ writer: TTYStdinWriter, forConnectionID connectionID: UUID) {
+        writers[connectionID] = writer
     }
 
-    func send(_ text: String, hostID: UUID) async throws {
-        try await send(Array(text.utf8), hostID: hostID)
+    func send(_ text: String, connectionID: UUID) async throws {
+        try await send(Array(text.utf8), connectionID: connectionID)
     }
 
-    func send(_ bytes: [UInt8], hostID: UUID) async throws {
-        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+    func send(_ bytes: [UInt8], connectionID: UUID) async throws {
+        guard let writer = writers[connectionID] else { throw SSHConnectionError.notConnected }
         try await writer.write(ByteBuffer(bytes: bytes))
     }
 
-    func resize(hostID: UUID, cols: Int, rows: Int) async throws {
-        guard let writer = writers[hostID] else { throw SSHConnectionError.notConnected }
+    func resize(connectionID: UUID, cols: Int, rows: Int) async throws {
+        guard let writer = writers[connectionID] else { throw SSHConnectionError.notConnected }
         try await writer.changeSize(cols: cols, rows: rows, pixelWidth: 0, pixelHeight: 0)
     }
 
-    func disconnect(hostID: UUID) async {
-        sessionTasks[hostID]?.cancel()
-        sessionTasks[hostID] = nil
-        writers[hostID] = nil
-        if let client = clients[hostID] {
-            clients[hostID] = nil
+    func disconnect(connectionID: UUID) async {
+        sessionTasks[connectionID]?.cancel()
+        sessionTasks[connectionID] = nil
+        writers[connectionID] = nil
+        hostIDs[connectionID] = nil
+        if let client = clients[connectionID] {
+            clients[connectionID] = nil
             try? await client.close()
         }
     }
 
     func disconnectAll() async {
         for id in Array(clients.keys) {
-            await disconnect(hostID: id)
+            await disconnect(connectionID: id)
         }
     }
 

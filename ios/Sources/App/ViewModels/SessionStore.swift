@@ -10,7 +10,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func open(host: Host, identity: Identity?) -> TerminalViewModel {
-        if let existing = sessions.first(where: { $0.host.id == host.id }) {
+        if let existing = sessions.first(where: { $0.host.id == host.id && $0.activeWorkspace == nil }) {
             activeSessionID = existing.id
             return existing
         }
@@ -18,6 +18,19 @@ final class SessionStore: ObservableObject {
         sessions.append(viewModel)
         activeSessionID = viewModel.id
         Task { await viewModel.connect() }
+        return viewModel
+    }
+
+    @discardableResult
+    func open(workspace: WorkspaceSession, host: Host, identity: Identity?) -> TerminalViewModel {
+        if let existing = sessions.first(where: { $0.activeWorkspace?.id == workspace.id }) {
+            activeSessionID = existing.id
+            return existing
+        }
+        let viewModel = TerminalViewModel(host: host, identity: identity)
+        sessions.append(viewModel)
+        activeSessionID = viewModel.id
+        Task { await viewModel.attach(to: workspace) }
         return viewModel
     }
 

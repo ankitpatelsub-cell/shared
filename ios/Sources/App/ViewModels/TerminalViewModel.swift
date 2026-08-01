@@ -31,6 +31,9 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
     @Published private(set) var status: ConnectionStatus = .disconnected
     @Published private(set) var responseLatencyMilliseconds: Int?
+    @Published private(set) var activeWorkspace: WorkspaceSession?
+    @Published private(set) var transcript = ""
+    @Published var pendingMultilinePaste: [UInt8]?
     @Published var pendingModifier: TerminalModifier?
 
     // SwiftTerm can emit several small delegate callbacks during a fast typing
@@ -41,12 +44,18 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     private var pendingOutput: [UInt8] = []
     private var outputFlushTask: Task<Void, Never>?
     private var responseStartedAt: Date?
+    private var attachedTmuxName: String?
 
     init(host: Host, identity: Identity?) {
         self.host = host
         self.identity = identity
         super.init()
         terminalView.terminalDelegate = self
+        let configuredSize = UserDefaults.standard.double(forKey: "dev.termvault.settings.fontSize")
+        terminalView.font = UIFont.monospacedSystemFont(
+            ofSize: configuredSize == 0 ? 14 : configuredSize,
+            weight: .regular
+        )
     }
 
     func connect() async {
@@ -55,6 +64,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         responseLatencyMilliseconds = nil
         do {
             try await SSHSessionManager.shared.connect(
+                connectionID: id,
                 host: host,
                 identity: identity,
                 onOutput: { [weak self] data in
@@ -79,7 +89,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     }
 
     func send(_ text: String) async throws {
-        try await SSHSessionManager.shared.send(text, hostID: host.id)
+        try await SSHSessionManager.shared.send(text, connectionID: id)
     }
 
     /// Fire-and-forget path for the extra-keys bar's fixed byte sequences
@@ -89,6 +99,67 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// through the `TerminalViewDelegate.send` keystroke path below.
     func sendRawBytes(_ bytes: [UInt8]) {
         enqueueInput(bytes)
+    }
+
+    func attach(to workspace: WorkspaceSession) async {
+        if attachedTmuxName == workspace.tmuxName, status == .connected { return }
+        activeWorkspace = workspace
+        if status == .disconnected || status.isFailure {
+            await connect()
+        }
+        if status == .connecting {
+            for _ in 0..<150 where status == .connecting {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        guard status == .connected else { return }
+
+        if attachedTmuxName != nil {
+            // Detach from the current remote tmux client before asking the
+            // underlying shell to attach to a different workspace.
+            try? await SSHSessionManager.shared.send([0x02, 0x64], connectionID: id) // Ctrl-B, D
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        let path = Self.shellQuote(workspace.path)
+        let name = Self.shellQuote(workspace.tmuxName)
+        let tmuxCommand: String
+        if let executable = workspace.tool.executable {
+            let tool = Self.shellQuote(executable)
+            let arguments = (workspace.arguments ?? []).map(Self.shellQuote).joined(separator: " ")
+            let environment = (workspace.environment ?? [:])
+                .filter { Self.isValidEnvironmentName($0.key) }
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\(Self.shellQuote($0.value))" }
+                .joined(separator: " ")
+            let launch = ([environment, tool, arguments].filter { !$0.isEmpty }).joined(separator: " ")
+            tmuxCommand = "if ! command -v \(tool) >/dev/null 2>&1; then printf '\\nTermVault: \(executable) is not installed on this host.\\n'; else tmux new-session -A -s \(name) -c \(path) \(Self.shellQuote(launch)); fi"
+        } else {
+            tmuxCommand = "tmux new-session -A -s \(name) -c \(path)"
+        }
+        let command = "if ! command -v tmux >/dev/null 2>&1; then printf '\\nTermVault: tmux is required for resumable sessions.\\n'; else \(tmuxCommand); fi\n"
+        do {
+            try await send(command)
+            attachedTmuxName = workspace.tmuxName
+            if let prompt = workspace.startupPrompt, !prompt.isEmpty {
+                try? await Task.sleep(for: .milliseconds(800))
+                try await send(prompt + "\n")
+            }
+        } catch {
+            status = .failed(error.localizedDescription)
+        }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func isValidEnvironmentName(_ value: String) -> Bool {
+        guard let first = value.utf8.first,
+              first == UInt8(ascii: "_") || first >= UInt8(ascii: "A") && first <= UInt8(ascii: "Z") || first >= UInt8(ascii: "a") && first <= UInt8(ascii: "z") else { return false }
+        return value.utf8.dropFirst().allSatisfy {
+            $0 == UInt8(ascii: "_") || $0 >= UInt8(ascii: "A") && $0 <= UInt8(ascii: "Z") || $0 >= UInt8(ascii: "a") && $0 <= UInt8(ascii: "z") || $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9")
+        }
     }
 
     /// Sends a Ctrl-chord immediately, independent of the toggle in the
@@ -150,8 +221,9 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         inputDrainTask?.cancel()
         inputDrainTask = nil
         pendingInput.removeAll(keepingCapacity: true)
-        let hostID = host.id
-        Task { await SSHSessionManager.shared.disconnect(hostID: hostID) }
+        attachedTmuxName = nil
+        let connectionID = id
+        Task { await SSHSessionManager.shared.disconnect(connectionID: connectionID) }
         status = .disconnected
     }
 
@@ -176,12 +248,12 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                     if self.responseStartedAt == nil {
                         self.responseStartedAt = Date()
                     }
-                    try await SSHSessionManager.shared.send(bytes, hostID: self.host.id)
+                    try await SSHSessionManager.shared.send(bytes, connectionID: self.id)
                 } catch {
                     self.pendingInput.removeAll(keepingCapacity: true)
                     self.inputDrainTask = nil
                     self.status = .disconnected
-                    await SSHSessionManager.shared.disconnect(hostID: self.host.id)
+                    await SSHSessionManager.shared.disconnect(connectionID: self.id)
                     return
                 }
             }
@@ -193,6 +265,10 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// keyboard handling remains responsive.
     private func receiveRemoteOutput(_ data: Data) {
         guard !data.isEmpty else { return }
+        transcript.append(String(decoding: data, as: UTF8.self))
+        if transcript.utf8.count > 1_000_000 {
+            transcript = String(transcript.suffix(500_000))
+        }
         if let startedAt = responseStartedAt {
             responseLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
             responseStartedAt = nil
@@ -211,6 +287,23 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         }
     }
 
+    func clearTranscript() {
+        transcript = ""
+    }
+
+    var plainTextTranscript: String {
+        let pattern = "\u{001B}(?:\\[[0-?]*[ -/]*[@-~]|\\][^\u{0007}]*(?:\u{0007}|\u{001B}\\\\))"
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return transcript }
+        let range = NSRange(transcript.startIndex..<transcript.endIndex, in: transcript)
+        return expression.stringByReplacingMatches(in: transcript, range: range, withTemplate: "")
+    }
+
+    func confirmMultilinePaste() {
+        guard let bytes = pendingMultilinePaste else { return }
+        pendingMultilinePaste = nil
+        enqueueInput(bytes)
+    }
+
     private func handleConnectionClosed() {
         let preserveFailure: Bool
         if case .failed = status {
@@ -222,15 +315,28 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         inputDrainTask = nil
         pendingInput.removeAll(keepingCapacity: true)
         responseStartedAt = nil
+        attachedTmuxName = nil
         if !preserveFailure {
             status = .disconnected
         }
     }
 }
 
+private extension ConnectionStatus {
+    var isFailure: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
 extension TerminalViewModel: TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = applyPendingModifier(to: Array(data))
+        if UserDefaults.standard.object(forKey: "dev.termvault.settings.pasteProtection") as? Bool ?? true,
+           bytes.count > 1, bytes.contains(0x0A) || bytes.contains(0x0D) {
+            pendingMultilinePaste = bytes
+            return
+        }
         enqueueInput(bytes)
     }
 
@@ -238,8 +344,8 @@ extension TerminalViewModel: TerminalViewDelegate {
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        let hostID = host.id
-        Task { try? await SSHSessionManager.shared.resize(hostID: hostID, cols: newCols, rows: newRows) }
+        let connectionID = id
+        Task { try? await SSHSessionManager.shared.resize(connectionID: connectionID, cols: newCols, rows: newRows) }
     }
 
     func scrolled(source: TerminalView, position: Double) {}

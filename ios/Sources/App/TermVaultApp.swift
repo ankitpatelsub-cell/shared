@@ -5,6 +5,9 @@ import SwiftData
 struct TermVaultApp: App {
     @StateObject private var lockService = BiometricLockService()
     @StateObject private var sessionStore = SessionStore()
+    @StateObject private var workspaceStore = WorkspaceStore()
+    @StateObject private var navigationStore = AppNavigationStore()
+    @StateObject private var agentPresetStore = AgentPresetStore()
     @Environment(\.scenePhase) private var scenePhase
 
     private var sharedModelContainer: ModelContainer = {
@@ -22,6 +25,9 @@ struct TermVaultApp: App {
             ZStack {
                 RootTabView()
                     .environmentObject(sessionStore)
+                    .environmentObject(workspaceStore)
+                    .environmentObject(navigationStore)
+                    .environmentObject(agentPresetStore)
                     .environmentObject(lockService)
 
                 if !lockService.isUnlocked {

@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var lockService: BiometricLockService
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
     @AppStorage("dev.termvault.settings.iCloudSyncEnabled") private var iCloudSyncEnabled = false
+    @AppStorage("dev.termvault.settings.agentNotifications") private var agentNotifications = false
+    @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
 
     var body: some View {
         NavigationStack {
@@ -14,6 +16,27 @@ struct SettingsView: View {
                 Section("Terminal") {
                     Stepper(value: $fontSize, in: 10...24) {
                         Text("Font Size: \(Int(fontSize))")
+                    }
+                    Toggle("Confirm Multiline Paste", isOn: $pasteProtection)
+                }
+                Section("Agents") {
+                    NavigationLink("Agent Presets") { AgentPresetsView() }
+                    Toggle("Completion Notifications", isOn: $agentNotifications)
+                        .onChange(of: agentNotifications) { _, enabled in
+                            if enabled {
+                                Task {
+                                    if !await NotificationService.requestAuthorization() {
+                                        agentNotifications = false
+                                    }
+                                }
+                            }
+                        }
+                }
+                Section("Integrations") {
+                    NavigationLink {
+                        GitHubSettingsView()
+                    } label: {
+                        Label("GitHub Personal Access Token", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                 }
                 Section("Sync") {

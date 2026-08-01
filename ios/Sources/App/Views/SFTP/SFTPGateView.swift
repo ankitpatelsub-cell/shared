@@ -6,28 +6,45 @@ import Citadel
 /// available from the actor before handing it to `SFTPBrowserView`.
 struct SFTPGateView: View {
     let host: Host
+    let connectionID: UUID
+    var onLaunch: ((String, AgentTool) -> Void)? = nil
+    var onLaunchPreset: ((String, AgentPreset) -> Void)? = nil
     @State private var sshClient: SSHClient?
-    @State private var isConnected = false
+    @State private var errorMessage: String?
+    @State private var attempt = 0
 
     var body: some View {
         Group {
             if let sshClient {
-                SFTPBrowserView(host: host, sshClient: sshClient)
+                SFTPBrowserView(host: host, connectionID: connectionID, sshClient: sshClient, onLaunch: onLaunch, onLaunchPreset: onLaunchPreset)
             } else {
-                ProgressView("Waiting for connection…")
-                    .task {
-                        // The terminal session connects asynchronously;
-                        // poll briefly rather than assuming it's already
-                        // up by the time this sheet appears.
-                        for _ in 0..<50 {
-                            if let client = await SSHSessionManager.shared.session(for: host.id) {
-                                sshClient = client
-                                return
-                            }
-                            try? await Task.sleep(for: .milliseconds(200))
+                ContentUnavailableView {
+                    Label(errorMessage == nil ? "Connecting" : "SFTP Unavailable", systemImage: errorMessage == nil ? "network" : "exclamationmark.triangle")
+                } description: {
+                    Text(errorMessage ?? "Waiting for the SSH connection…")
+                } actions: {
+                    if errorMessage != nil {
+                        Button("Retry") {
+                            errorMessage = nil
+                            attempt += 1
                         }
                     }
+                }
+                .overlay { if errorMessage == nil { ProgressView().offset(y: 70) } }
+                .task(id: attempt) { await waitForConnection() }
             }
         }
+    }
+
+    private func waitForConnection() async {
+        for _ in 0..<50 {
+            if let client = await SSHSessionManager.shared.session(for: connectionID) {
+                sshClient = client
+                return
+            }
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        errorMessage = "The SSH connection did not become ready within 10 seconds."
     }
 }
