@@ -60,9 +60,24 @@ private enum KeychainServiceName {
     static let identityPrivateKey = "dev.termvault.identity.privatekey"
     static let identityPassphrase = "dev.termvault.identity.passphrase"
     static let githubToken = "dev.termvault.github.token"
+    static let cloudToken = "dev.termvault.cloud.token"
 }
 
 extension KeychainService {
+    static func cloudToken() throws -> String {
+        let data = try read(account: "masystem.co.in", service: KeychainServiceName.cloudToken)
+        guard let value = String(data: data, encoding: .utf8) else { throw KeychainError.unexpectedData }
+        return value
+    }
+
+    static func setCloudToken(_ token: String) throws {
+        try save(Data(token.utf8), account: "masystem.co.in", service: KeychainServiceName.cloudToken)
+    }
+
+    static func deleteCloudToken() throws {
+        try delete(account: "masystem.co.in", service: KeychainServiceName.cloudToken)
+    }
+
     static func githubToken() throws -> String {
         let data = try read(account: "github.com", service: KeychainServiceName.githubToken)
         guard let token = String(data: data, encoding: .utf8) else { throw KeychainError.unexpectedData }

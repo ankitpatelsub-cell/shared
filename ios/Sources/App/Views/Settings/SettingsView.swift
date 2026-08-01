@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var lockService: BiometricLockService
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
-    @AppStorage("dev.termvault.settings.iCloudSyncEnabled") private var iCloudSyncEnabled = false
     @AppStorage("dev.termvault.settings.agentNotifications") private var agentNotifications = false
     @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
     @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
@@ -60,11 +59,10 @@ struct SettingsView: View {
                     }
                 }
                 Section("Sync") {
-                    Toggle("iCloud Sync (encrypted)", isOn: $iCloudSyncEnabled)
-                    if iCloudSyncEnabled {
-                        Text("Hosts would be encrypted client-side before syncing via CloudKit's private database. Not yet wired to a CloudKit container — see spec section 6 and README.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        CloudVaultSettingsView()
+                    } label: {
+                        Label("Encrypted Cloud Vault", systemImage: "lock.icloud")
                     }
                 }
                 Section {

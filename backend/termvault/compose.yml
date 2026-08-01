@@ -1,0 +1,17 @@
+services:
+  termvault-vault:
+    build: .
+    container_name: termvault-vault
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8791:8791"
+    volumes:
+      - termvault-data:/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  termvault-data:
