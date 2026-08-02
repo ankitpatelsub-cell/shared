@@ -10,11 +10,27 @@ final class SessionStore: ObservableObject {
     var connectionSnippetCommands: [String] = []
     private var connectionHosts: [Host] = []
     private var connectionIdentities: [Identity] = []
-
+    
     func configureConnectionCatalog(hosts: [Host], identities: [Identity]) {
         connectionHosts = hosts
         connectionIdentities = identities
     }
+    
+    private func buildJumpHosts(for host: Host) -> [SSHJumpHop] {
+        var hops: [SSHJumpHop] = []
+        var currentJumpHostID = host.jumpHostID
+        
+        // Follow the chain of jump hosts
+        while let jumpHostID = currentJumpHostID,
+              let jumpHost = connectionHosts.first(where: { $0.id == jumpHostID }) {
+            let jumpIdentity = connectionIdentities.first { $0.id == jumpHost.identityID }
+            hops.append(SSHJumpHop(host: jumpHost, identity: jumpIdentity))
+            currentJumpHostID = jumpHost.jumpHostID
+        }
+        
+        return hops
+    }
+
     private let preferencesKey = "dev.termvault.sessionPreferences"
 
     private struct SessionPreference: Codable {
@@ -29,9 +45,8 @@ final class SessionStore: ObservableObject {
             activeSessionID = existing.id
             return existing
         }
-        let jumpHost = connectionHosts.first { $0.id == host.jumpHostID }
-        let jumpIdentity = connectionIdentities.first { $0.id == jumpHost?.identityID }
-        let viewModel = TerminalViewModel(host: host, identity: identity, jumpHost: jumpHost, jumpIdentity: jumpIdentity)
+        let jumpHosts = buildJumpHosts(for: host)
+        let viewModel = TerminalViewModel(host: host, identity: identity, jumpHosts: jumpHosts)
         viewModel.connectionSnippetCommands = connectionSnippetCommands
         applyPreference(to: viewModel)
         sessions.append(viewModel)
@@ -47,13 +62,11 @@ final class SessionStore: ObservableObject {
             activeSessionID = existing.id
             return existing
         }
+        let jumpHosts = buildJumpHosts(for: host)
         let viewModel = TerminalViewModel(
             host: host,
             identity: identity,
-            jumpHost: connectionHosts.first { $0.id == host.jumpHostID },
-            jumpIdentity: connectionIdentities.first { identity in
-                identity.id == connectionHosts.first { $0.id == host.jumpHostID }?.identityID
-            },
+            jumpHosts: jumpHosts,
             persistenceKey: "workspace:\(workspace.id.uuidString)"
         )
         viewModel.connectionSnippetCommands = connectionSnippetCommands

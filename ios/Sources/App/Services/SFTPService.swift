@@ -85,19 +85,65 @@ actor SFTPService {
         return result
     }
 
-    func download(hostID: UUID, sshClient: SSHClient, remotePath: String, to localURL: URL) async throws {
+    func download(hostID: UUID, sshClient: SSHClient, remotePath: String, to localURL: URL, progressHandler: ((Double) -> Void)? = nil) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
-        let buffer = try await sftp.withFile(filePath: remotePath, flags: .read) { file in
-            try await file.readAll()
+        let file = try await sftp.openFile(filePath: remotePath, flags: .read)
+        defer { try? file.close() }
+        
+        let attrs = try await file.stat()
+        let totalSize = Int64(attrs.size ?? 0)
+        var bytesRead: Int64 = 0
+        
+        let outputStream = OutputStream(url: localURL, append: false)!
+        outputStream.open()
+        defer { outputStream.close() }
+        
+        let bufferSize = 64 * 1024 // 64KB chunks
+        var buffer = ByteBufferAllocator().buffer(capacity: bufferSize)
+        
+        while true {
+            let read = try await file.read(into: &buffer, count: bufferSize)
+            if read == 0 { break }
+            
+            let data = buffer.readBytes(length: read)!
+            data.withUnsafeBytes { rawBuffer in
+                _ = outputStream.write(rawBuffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: read)
+            }
+            
+            bytesRead += Int64(read)
+            if totalSize > 0 {
+                progressHandler?(Double(bytesRead) / Double(totalSize))
+            }
+            
+            buffer.clear()
         }
-        try Data(buffer.readableBytesView).write(to: localURL)
     }
-
-    func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String) async throws {
+    
+    func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String, progressHandler: ((Double) -> Void)? = nil) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
         let data = try Data(contentsOf: localURL)
-        try await sftp.withFile(filePath: remotePath, flags: [.write, .create, .truncate]) { file in
-            try await file.write(ByteBuffer(data: data))
+        let totalSize = Int64(data.count)
+        var bytesWritten: Int64 = 0
+        
+        let file = try await sftp.openFile(filePath: remotePath, flags: [.write, .create, .truncate])
+        defer { try? file.close() }
+        
+        let chunkSize = 64 * 1024
+        var offset = 0
+        
+        while offset < data.count {
+            let chunkEnd = min(offset + chunkSize, data.count)
+            let chunk = data[offset..<chunkEnd]
+            var buffer = ByteBufferAllocator().buffer(capacity: chunk.count)
+            buffer.writeBytes(chunk)
+            
+            try await file.write(buffer)
+            
+            offset = chunkEnd
+            bytesWritten += Int64(chunk.count)
+            if totalSize > 0 {
+                progressHandler?(Double(bytesWritten) / Double(totalSize))
+            }
         }
     }
 

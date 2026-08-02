@@ -23,6 +23,12 @@ enum SSHConnectionError: Error, LocalizedError {
     }
 }
 
+/// Represents a hop in a multi-hop SSH connection chain
+struct SSHJumpHop {
+    let host: Host
+    let identity: Identity?
+}
+
 /// Owns every live SSH connection, keyed by host ID, so switching between
 /// terminal tabs never reconnects — mirrors Termius' tab-switching model.
 ///
@@ -31,14 +37,12 @@ enum SSHConnectionError: Error, LocalizedError {
 /// + `SSHClient.connect(to:)`, and get an interactive shell via
 /// `client.withPTY(_:perform:)`, whose `perform` closure only returns once
 /// the session ends — so `connect()` runs it inside a long-lived `Task` and
-/// stashes the `TTYStdinWriter` it hands back for later `send(_:hostID:)`
-/// calls, rather than trying to hold onto a persistent "shell" object the
-/// way `requestShell()` (which doesn't exist in this API) would suggest.
+/// stashes the `TTYStdinWriter` it hands back for later `send(_:hostID:)` calls.
 actor SSHSessionManager {
     static let shared = SSHSessionManager()
 
     private var clients: [UUID: SSHClient] = [:]
-    private var jumpClients: [UUID: SSHClient] = [:]
+    private var jumpClients: [UUID: [SSHClient]] = [:] // Support multiple jump hops
     private var hostIDs: [UUID: UUID] = [:]
     private var writers: [UUID: TTYStdinWriter] = [:]
     // SwiftTerm commonly reports its real viewport before `withPTY` has
@@ -64,8 +68,7 @@ actor SSHSessionManager {
         connectionID: UUID,
         host: Host,
         identity: Identity?,
-        jumpHost: Host? = nil,
-        jumpIdentity: Identity? = nil,
+        jumpHosts: [SSHJumpHop] = [], // Support multiple jump hosts
         onOutput: @escaping @Sendable (Data) -> Void,
         onClose: @escaping @Sendable () -> Void
     ) async throws {
@@ -79,32 +82,48 @@ actor SSHSessionManager {
             hostKeyValidator: .custom(TOFUHostKeyValidator(host: host.address, port: host.port))
         )
 
-        let client: SSHClient
-        if let jumpHost {
-            let jumpAuthMethod = try makeAuthenticationMethod(host: jumpHost, identity: jumpIdentity)
-            let jumpSettings = SSHClientSettings(
-                host: jumpHost.address,
-                port: jumpHost.port,
-                authenticationMethod: { jumpAuthMethod },
-                hostKeyValidator: .custom(TOFUHostKeyValidator(host: jumpHost.address, port: jumpHost.port))
-            )
-            let jumpClient = try await SSHClient.connect(to: jumpSettings)
-            do {
-                client = try await jumpClient.jump(to: settings)
-                jumpClients[connectionID] = jumpClient
-            } catch {
-                try? await jumpClient.close()
-                throw error
+        var finalClient: SSHClient
+        var jumpClientChain: [SSHClient] = []
+
+        if !jumpHosts.isEmpty {
+            // Build chain of jump hosts
+            var currentClient: SSHClient?
+            
+            for (index, hop) in jumpHosts.enumerated() {
+                let hopAuthMethod = try makeAuthenticationMethod(host: hop.host, identity: hop.identity)
+                let hopSettings = SSHClientSettings(
+                    host: hop.host.address,
+                    port: hop.host.port,
+                    authenticationMethod: { hopAuthMethod },
+                    hostKeyValidator: .custom(TOFUHostKeyValidator(host: hop.host.address, port: hop.host.port))
+                )
+                
+                let hopClient: SSHClient
+                if let previousClient = currentClient {
+                    hopClient = try await previousClient.jump(to: hopSettings)
+                } else {
+                    hopClient = try await SSHClient.connect(to: hopSettings)
+                }
+                
+                jumpClientChain.append(hopClient)
+                currentClient = hopClient
             }
+            
+            // Connect to final target through the last jump host
+            finalClient = try await currentClient!.jump(to: settings)
         } else {
-            client = try await SSHClient.connect(to: settings)
+            finalClient = try await SSHClient.connect(to: settings)
         }
-        clients[connectionID] = client
+
+        clients[connectionID] = finalClient
+        if !jumpClientChain.isEmpty {
+            jumpClients[connectionID] = jumpClientChain
+        }
         hostIDs[connectionID] = host.id
 
         sessionTasks[connectionID] = Task {
             do {
-                try await client.withPTY(
+                try await finalClient.withPTY(
                     SSHChannelRequestEvent.PseudoTerminalRequest(
                         wantReply: true,
                         term: "xterm-256color",
@@ -185,8 +204,11 @@ actor SSHSessionManager {
             clients[connectionID] = nil
             try? await client.close()
         }
-        if let jumpClient = jumpClients.removeValue(forKey: connectionID) {
-            try? await jumpClient.close()
+        // Close all jump clients in reverse order
+        if let jumpChain = jumpClients.removeValue(forKey: connectionID) {
+            for jumpClient in jumpChain.reversed() {
+                try? await jumpClient.close()
+            }
         }
     }
 

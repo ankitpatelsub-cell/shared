@@ -1,6 +1,7 @@
 import Foundation
 import SwiftTerm
 import UIKit
+import UniformTypeIdentifiers
 
 enum ConnectionStatus: Equatable {
     case disconnected
@@ -36,6 +37,57 @@ enum TerminalAttachmentError: Error, LocalizedError {
     }
 }
 
+/// OSC (Operating System Command) sequences for terminal integration
+enum OSCSequence {
+    /// OSC 52 - Clipboard operations
+    /// Format: ESC ] 52 ; <base64> ; <data> BEL/ST
+    static func clipboardSet(base64Data: String) -> String {
+        "\u{1B}]52;c;\(base64Data)\u{07}"
+    }
+    
+    /// OSC 8 - Hyperlinks
+    /// Format: ESC ] 8 ; id=<id> ; <url> ST ... ESC ] 8 ; ; ST
+    static func hyperlinkStart(url: String, id: String? = nil) -> String {
+        if let id {
+            return "\u{1B}]8;id=\(id);\(url)\u{1B}\\"
+        }
+        return "\u{1B}]8;;\(url)\u{1B}\\"
+    }
+    
+    static func hyperlinkEnd() -> String {
+        "\u{1B}]8;;\u{1B}\\"
+    }
+    
+    /// Parse OSC 52 from incoming data
+    static func parseClipboard(from data: Data) -> String? {
+        guard let string = String(data: data, encoding: .utf8) else { return nil }
+        // Look for OSC 52 sequences: ESC ] 52 ; c ; <base64> BEL/ST
+        let pattern = #"\u{1B}\](?:52);[^;]*;([^\u{07}\u{1B}]+)(?:\u{07}|\u{1B}\\\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(string.startIndex..<string.endIndex, in: string)
+        guard let match = regex.firstMatch(in: string, range: range),
+              let range1 = Range(match.range(at: 1), in: string) else { return nil }
+        let base64 = String(string[range1])
+        guard let decoded = Data(base64Encoded: base64),
+              let text = String(data: decoded, encoding: .utf8) else { return nil }
+        return text
+    }
+    
+    /// Parse OSC 8 hyperlinks from incoming data
+    static func parseHyperlinks(from data: Data) -> [(url: String, id: String?, range: NSRange)] {
+        guard let string = String(data: data, encoding: .utf8) else { return [] }
+        // Look for OSC 8 sequences: ESC ] 8 ; [id=xxx;] url ST ... ESC ] 8 ; ; ST
+        let pattern = #"\u{1B}\]8;(?:id=([^;]+);)?([^\u{1B}]+)\u{1B}\\[^\u{1B}]*\u{1B}\]8;;\u{1B}\\"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(string.startIndex..<string.endIndex, in: string)
+        return regex.matches(in: string, range: range).compactMap { match in
+            let id = match.range(at: 1).location != NSNotFound ? Range(match.range(at: 1), in: string).map { String(string[$0]) } : nil
+            guard let urlRange = Range(match.range(at: 2), in: string) else { return nil }
+            return (url: String(string[urlRange]), id: id, range: match.range)
+        }
+    }
+}
+
 /// Bridges one SwiftTerm `TerminalView` to one `SSHSessionManager` session.
 /// Keystrokes flow out via `TerminalViewDelegate.send`, remote output flows
 /// in via the `onOutput` callback registered at connect time.
@@ -44,8 +96,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     let host: Host
     let identity: Identity?
-    let jumpHost: Host?
-    let jumpIdentity: Identity?
+    let jumpHosts: [SSHJumpHop] // Support multiple jump hosts
     let terminalView = TerminalView(frame: .zero)
     let persistenceKey: String
     let startedAt = Date()
@@ -59,39 +110,130 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published var customTitle: String?
     @Published var isPinned = false
     @Published private(set) var isViewingHistory = false
-    @Published private(set) var attachmentUploadProgress: String?
-    var connectionSnippetCommands: [String] = []
+        @Published private(set) var attachmentUploadProgress: String?
+        var connectionSnippetCommands: [String] = []
+    
+        // Per-host terminal settings
+        @Published var terminalFontSize: Double = 14
+        @Published var terminalFontName: String = "system"
+        @Published var terminalThemeName: String = "midnight"
+        @Published var bellEnabled: Bool = true
+        @Published var cursorBlink: Bool = true
+    
+        // OSC 52 clipboard
+        @Published private(set) var remoteClipboard: String?
+        // OSC 8 hyperlinks
+        @Published private(set) var detectedHyperlinks: [(url: String, id: String?)] = []
 
-    // SwiftTerm can emit several small delegate callbacks during a fast typing
-    // burst. Keep one ordered drain alive instead of creating an unstructured
-    // task (and SSH write) for every callback.
-    private var pendingInput: [UInt8] = []
-    private var inputDrainTask: Task<Void, Never>?
-    private var pendingOutput: [UInt8] = []
-    private var outputFlushTask: Task<Void, Never>?
-    private var resizeTask: Task<Void, Never>?
-    private var responseStartedAt: Date?
-    private var attachedTmuxName: String?
-    private var terminalSize: (cols: Int, rows: Int)?
+        // SwiftTerm can emit several small delegate callbacks during a fast typing
+            // burst. Keep one ordered drain alive instead of creating an unstructured
+            // task (and SSH write) for every callback.
+            private var pendingInput: [UInt8] = []
+            private var inputDrainTask: Task<Void, Never>? = nil
+            private var pendingOutput: [UInt8] = []
+            private var outputFlushTask: Task<Void, Never>? = nil
+            private var resizeTask: Task<Void, Never>? = nil
+            private var responseStartedAt: Date? = nil
+            private var attachedTmuxName: String? = nil
+            private var terminalSize: (cols: Int, rows: Int)? = nil
 
-    init(
-        host: Host, identity: Identity?, jumpHost: Host? = nil,
-        jumpIdentity: Identity? = nil, persistenceKey: String? = nil
-    ) {
-        self.host = host
-        self.identity = identity
-        self.jumpHost = jumpHost
-        self.jumpIdentity = jumpIdentity
-        self.persistenceKey = persistenceKey ?? "host:\(host.id.uuidString)"
-        super.init()
-        terminalView.terminalDelegate = self
-        let configuredSize = UserDefaults.standard.double(forKey: "dev.termvault.settings.fontSize")
-        terminalView.font = UIFont.monospacedSystemFont(
-            ofSize: configuredSize == 0 ? 14 : configuredSize,
-            weight: .regular
-        )
+            // Transcript persistence - save periodically to survive crashes
+            private var transcriptSaveTask: Task<Void, Never>? = nil
+            private let transcriptSaveInterval: TimeInterval = 30 // seconds
+            private let maxTranscriptSize = 2_000_000 // 2M chars (increased from 1M)
+            private let transcriptTrimSize = 1_000_000 // trim to 1M (increased from 500K)
+
+            init(
+                host: Host, identity: Identity?, jumpHosts: [SSHJumpHop] = [],
+                persistenceKey: String? = nil
+            ) {
+                self.host = host
+                self.identity = identity
+                self.jumpHosts = jumpHosts
+                self.persistenceKey = persistenceKey ?? "host:\(host.id.uuidString)"
+                super.init()
+                terminalView.terminalDelegate = self
+                loadTerminalSettings()
+                applyTerminalSettings()
+                loadPersistedTranscript()
+                startTranscriptAutoSave()
+            }
+    
+    // MARK: - Per-Host Terminal Settings
+    
+    private func settingsKey(_ key: String) -> String {
+        "dev.termvault.terminal.\(host.id.uuidString).\(key)"
     }
-
+    
+    private func loadTerminalSettings() {
+        terminalFontSize = UserDefaults.standard.double(forKey: settingsKey("fontSize"))
+        if terminalFontSize == 0 { terminalFontSize = 14 }
+        
+        terminalFontName = UserDefaults.standard.string(forKey: settingsKey("fontName")) ?? "system"
+        terminalThemeName = UserDefaults.standard.string(forKey: settingsKey("themeName")) ?? "midnight"
+        bellEnabled = UserDefaults.standard.bool(forKey: settingsKey("bellEnabled"))
+        cursorBlink = UserDefaults.standard.bool(forKey: settingsKey("cursorBlink"))
+        if !UserDefaults.standard.bool(forKey: settingsKey("cursorBlinkSet")) {
+            cursorBlink = true // default
+        }
+    }
+    
+    private func saveTerminalSettings() {
+        UserDefaults.standard.set(terminalFontSize, forKey: settingsKey("fontSize"))
+        UserDefaults.standard.set(terminalFontName, forKey: settingsKey("fontName"))
+        UserDefaults.standard.set(terminalThemeName, forKey: settingsKey("themeName"))
+        UserDefaults.standard.set(bellEnabled, forKey: settingsKey("bellEnabled"))
+        UserDefaults.standard.set(cursorBlink, forKey: settingsKey("cursorBlink"))
+        UserDefaults.standard.set(true, forKey: settingsKey("cursorBlinkSet"))
+    }
+    
+    func applyTerminalSettings() {
+        let font: UIFont
+        if terminalFontName == "system" {
+            font = UIFont.monospacedSystemFont(ofSize: terminalFontSize, weight: .regular)
+        } else if let customFont = UIFont(name: terminalFontName, size: terminalFontSize) {
+            font = customFont
+        } else {
+            font = UIFont.monospacedSystemFont(ofSize: terminalFontSize, weight: .regular)
+        }
+        terminalView.font = font
+        terminalView.cursorBlink = cursorBlink
+        // Theme colors would be applied here based on terminalThemeName
+        applyTerminalTheme()
+        saveTerminalSettings()
+    }
+    
+    func updateFontSize(_ size: Double) {
+        terminalFontSize = max(10, min(24, size))
+        applyTerminalSettings()
+    }
+    
+    func updateFontName(_ name: String) {
+        terminalFontName = name
+        applyTerminalSettings()
+    }
+    
+    func updateThemeName(_ name: String) {
+        terminalThemeName = name
+        applyTerminalSettings()
+    }
+    
+    func toggleBell() {
+        bellEnabled.toggle()
+        applyTerminalSettings()
+    }
+    
+    func toggleCursorBlink() {
+        cursorBlink.toggle()
+        applyTerminalSettings()
+    }
+    
+    private func applyTerminalTheme() {
+        // Apply color theme based on terminalThemeName
+        // This would set foreground, background, cursor, selection colors
+        // For now, we'll use the global theme from AppStorage
+    }
+    
     var displayTitle: String {
         if let customTitle, !customTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return customTitle
@@ -126,8 +268,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                 connectionID: id,
                 host: host,
                 identity: identity,
-                jumpHost: jumpHost,
-                jumpIdentity: jumpIdentity,
+                jumpHosts: jumpHosts,
                 onOutput: { [weak self] data in
                     Task { @MainActor in
                         self?.receiveRemoteOutput(data)
@@ -378,6 +519,16 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         resizeTask = nil
         pendingInput.removeAll(keepingCapacity: true)
         attachedTmuxName = nil
+        
+        // Record session history on explicit disconnect
+        if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { @MainActor in
+                SessionHistoryStore.shared.record(self)
+            }
+        }
+        
+        stopTranscriptAutoSave()
+        
         let connectionID = id
         Task { await SSHSessionManager.shared.disconnect(connectionID: connectionID) }
         status = .disconnected
@@ -421,9 +572,23 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// keyboard handling remains responsive.
     private func receiveRemoteOutput(_ data: Data) {
         guard !data.isEmpty else { return }
+        
+        // Parse OSC 52 clipboard from remote
+        if let clipboardText = OSCSequence.parseClipboard(from: data) {
+            remoteClipboard = clipboardText
+            UIPasteboard.general.string = clipboardText
+        }
+        
+        // Parse OSC 8 hyperlinks from remote
+        let hyperlinks = OSCSequence.parseHyperlinks(from: data)
+        if !hyperlinks.isEmpty {
+            detectedHyperlinks = hyperlinks.map { (url: $0.url, id: $0.id) }
+        }
+        
         transcript.append(String(decoding: data, as: UTF8.self))
-        if transcript.utf8.count > 1_000_000 {
-            transcript = String(transcript.suffix(500_000))
+        // Trim transcript if it exceeds max size
+        if transcript.utf8.count > maxTranscriptSize {
+            transcript = String(transcript.suffix(transcriptTrimSize))
         }
         if let startedAt = responseStartedAt {
             responseLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
@@ -446,7 +611,42 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     func clearTranscript() {
         transcript = ""
     }
-
+    
+    // MARK: - OSC 52 Clipboard
+    
+    /// Send local clipboard to remote via OSC 52
+    func syncClipboardToRemote() {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        let base64 = Data(text.utf8).base64EncodedString()
+        let osc52 = OSCSequence.clipboardSet(base64Data: base64)
+        sendRawBytes(Array(osc52.utf8))
+    }
+    
+    /// Request remote clipboard (some terminals support this)
+    func requestRemoteClipboard() {
+        // OSC 52 query: ESC ] 52 ; c ; ? BEL
+        let query = "\u{1B}]52;c;?\u{07}"
+        sendRawBytes(Array(query.utf8))
+    }
+    
+    // MARK: - OSC 8 Hyperlinks
+    
+    /// Handle hyperlink tap - open URL or handle file paths
+    func handleHyperlinkTap(_ url: String) {
+        if url.hasPrefix("file://") {
+            // Handle local file paths - could open in SFTP browser
+            let path = String(url.dropFirst("file://".count))
+            // Navigate to path in SFTP browser if available
+        } else if url.hasPrefix("http://") || url.hasPrefix("https://") {
+            // Open in Safari
+            if let url = URL(string: url) {
+                UIApplication.shared.open(url)
+            }
+        } else if url.hasPrefix("ssh://") {
+            // Handle SSH links - could parse and connect
+        }
+    }
+    
     var plainTextTranscript: String {
         let pattern = "\u{001B}(?:\\[[0-?]*[ -/]*[@-~]|\\][^\u{0007}]*(?:\u{0007}|\u{001B}\\\\))"
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return transcript }
@@ -459,7 +659,50 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         pendingMultilinePaste = nil
         enqueueInput(bytes)
     }
-
+    
+    // MARK: - Transcript Persistence
+    
+    private func transcriptFileURL() -> URL {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TermVault", isDirectory: true)
+            .appendingPathComponent("Transcripts", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("\(persistenceKey).transcript")
+    }
+    
+    private func loadPersistedTranscript() {
+        let url = transcriptFileURL()
+        if let data = try? Data(contentsOf: url),
+           let saved = String(data: data, encoding: .utf8) {
+            transcript = saved
+        }
+    }
+    
+    private func savePersistedTranscript() {
+        let url = transcriptFileURL()
+        try? transcript.data(using: .utf8)?.write(to: url, options: .atomic)
+    }
+    
+    private func startTranscriptAutoSave() {
+        transcriptSaveTask?.cancel()
+        transcriptSaveTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(self.transcriptSaveInterval))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.savePersistedTranscript()
+                }
+            }
+        }
+    }
+    
+    private func stopTranscriptAutoSave() {
+        transcriptSaveTask?.cancel()
+        transcriptSaveTask = nil
+        savePersistedTranscript() // Final save
+    }
+    
     private func handleConnectionClosed() {
         let preserveFailure: Bool
         if case .failed = status {
@@ -474,6 +717,16 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         pendingInput.removeAll(keepingCapacity: true)
         responseStartedAt = nil
         attachedTmuxName = nil
+        
+        // Record session history on disconnect (not just explicit close)
+        if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { @MainActor in
+                SessionHistoryStore.shared.record(self)
+            }
+        }
+        
+        stopTranscriptAutoSave()
+        
         if !preserveFailure {
             status = .disconnected
         }

@@ -15,6 +15,10 @@ struct SFTPBrowserView: View {
     @State private var editingFile: SFTPEntry?
     @State private var operatingOnEntry: SFTPEntry?
     @State private var deletingEntry: SFTPEntry?
+    @State private var searchText = ""
+    @State private var sortOrder: SortOrder = .nameAsc
+    @State private var isMultiSelectMode = false
+    @State private var selectedEntries: Set<UUID> = []
 
     init(host: Host, connectionID: UUID, sshClient: SSHClient, onLaunch: ((String, AgentTool) -> Void)? = nil, onLaunchPreset: ((String, AgentPreset) -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: SFTPBrowserViewModel(host: host, connectionID: connectionID, sshClient: sshClient))
@@ -25,19 +29,51 @@ struct SFTPBrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             breadcrumbBar
+            
+            // Search bar & Sort picker
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search files...", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                // Sort picker
+                Picker("Sort", selection: $sortOrder) {
+                    ForEach(SortOrder.allCases) { order in
+                        Text(order.rawValue).tag(order)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 140)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.bar)
+            
             List {
-                ForEach(viewModel.entries) { entry in
-                    SFTPEntryRow(entry: entry)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            Task { await viewModel.open(entry) }
+                ForEach(filteredAndSortedEntries) { entry in
+                    SFTPEntryRow(
+                        entry: entry,
+                        isSelected: selectedEntries.contains(entry.id),
+                        isMultiSelectMode: isMultiSelectMode,
+                        onTap: {
+                            if isMultiSelectMode {
+                                toggleSelection(entry.id)
+                            } else {
+                                Task { await viewModel.open(entry) }
+                            }
+                        },
+                        onDownload: {
+                            Task { downloadedURL = await viewModel.download(entry) }
                         }
-                        .swipeActions {
+                    )
+                    .swipeActions {
+                        if !isMultiSelectMode {
                             Button(role: .destructive) {
                                 deletingEntry = entry
                             } label: { Label("Delete", systemImage: "trash") }
                         }
-                        .contextMenu {
+                    }
+                    .contextMenu {
+                        if !isMultiSelectMode {
                             if entry.isDirectory, let onLaunch {
                                 Menu("Start Agent Here") {
                                     ForEach(AgentTool.allCases) { tool in
@@ -57,6 +93,7 @@ struct SFTPBrowserView: View {
                                 }
                             }
                         }
+                    }
                 }
             }
             .listStyle(.plain)
@@ -68,39 +105,69 @@ struct SFTPBrowserView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    ProjectDashboardView(host: viewModel.host, path: viewModel.currentPath)
-                } label: {
-                    Image(systemName: "chart.bar.doc.horizontal")
-                }
-                .accessibilityLabel("Project dashboard")
-                if let onLaunch {
+                if isMultiSelectMode {
+                    Button("Cancel") {
+                        isMultiSelectMode = false
+                        selectedEntries.removeAll()
+                    }
                     Menu {
-                        if let onLaunchPreset, !presetStore.presets.isEmpty {
-                            Section("Presets") {
-                                ForEach(presetStore.presets) { preset in
-                                    Button { onLaunchPreset(viewModel.currentPath, preset) } label: {
-                                        Label(preset.name, systemImage: preset.tool.icon)
+                        Button("Select All") {
+                            selectedEntries = Set(filteredAndSortedEntries.map(\.id))
+                        }
+                        Button("Deselect All") {
+                            selectedEntries.removeAll()
+                        }
+                        Divider()
+                        if !selectedEntries.isEmpty {
+                            Button("Download Selected") {
+                                Task { await downloadSelected() }
+                            }
+                            Button("Delete Selected", role: .destructive) {
+                                Task { await deleteSelected() }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                } else {
+                    NavigationLink {
+                        ProjectDashboardView(host: viewModel.host, path: viewModel.currentPath)
+                    } label: {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                    }
+                    .accessibilityLabel("Project dashboard")
+                    if let onLaunch {
+                        Menu {
+                            if let onLaunchPreset, !presetStore.presets.isEmpty {
+                                Section("Presets") {
+                                    ForEach(presetStore.presets) { preset in
+                                        Button { onLaunchPreset(viewModel.currentPath, preset) } label: {
+                                            Label(preset.name, systemImage: preset.tool.icon)
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Section("Tools") {
-                        ForEach(AgentTool.allCases) { tool in
-                            Button {
-                                onLaunch(viewModel.currentPath, tool)
-                            } label: {
-                                Label("Start \(tool.title)", systemImage: tool.icon)
+                            Section("Tools") {
+                            ForEach(AgentTool.allCases) { tool in
+                                Button {
+                                    onLaunch(viewModel.currentPath, tool)
+                                } label: {
+                                    Label("Start \(tool.title)", systemImage: tool.icon)
+                                }
                             }
+                            }
+                        } label: {
+                            Image(systemName: "play.rectangle.on.rectangle")
                         }
-                        }
-                    } label: {
-                        Image(systemName: "play.rectangle.on.rectangle")
+                        .accessibilityLabel("Start tool in this folder")
                     }
-                    .accessibilityLabel("Start tool in this folder")
+                    Button { showingImporter = true } label: { Image(systemName: "square.and.arrow.up") }
+                    Button { showingNewFolderAlert = true } label: { Image(systemName: "folder.badge.plus") }
+                    Button {
+                        isMultiSelectMode = true
+                    } label: { Image(systemName: "checkmark.circle") }
+                    .accessibilityLabel("Select multiple")
                 }
-                Button { showingImporter = true } label: { Image(systemName: "square.and.arrow.up") }
-                Button { showingNewFolderAlert = true } label: { Image(systemName: "folder.badge.plus") }
             }
         }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.item]) { result in
@@ -182,29 +249,149 @@ struct SFTPBrowserView: View {
         .task { await viewModel.load() }
     }
 
+    private func toggleSelection(_ id: UUID) {
+        if selectedEntries.contains(id) {
+            selectedEntries.remove(id)
+        } else {
+            selectedEntries.insert(id)
+        }
+    }
+    
+    private func downloadSelected() async {
+        let entriesToDownload = filteredAndSortedEntries.filter { selectedEntries.contains($0.id) }
+        for entry in entriesToDownload {
+            _ = await viewModel.download(entry)
+        }
+        isMultiSelectMode = false
+        selectedEntries.removeAll()
+    }
+    
+    private func deleteSelected() async {
+        let entriesToDelete = filteredAndSortedEntries.filter { selectedEntries.contains($0.id) }
+        for entry in entriesToDelete {
+            await viewModel.delete(entry)
+        }
+        isMultiSelectMode = false
+        selectedEntries.removeAll()
+    }
+    
     private var breadcrumbBar: some View {
         HStack {
             Button { Task { await viewModel.goUp() } } label: {
                 Image(systemName: "chevron.up")
             }
             .disabled(viewModel.currentPath == "/")
-            Text(viewModel.currentPath)
-                .font(.system(.footnote, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.head)
+            
+            // Breadcrumb path with tap-to-jump
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(breadcrumbSegments, id: \.self) { segment in
+                        if segment == breadcrumbSegments.last {
+                            Text(segment)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(.primary)
+                        } else {
+                            Button(action: { navigateToBreadcrumb(segment) }) {
+                                Text(segment)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .foregroundStyle(.blue)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .lineLimit(1)
+            
             Spacer()
+            
+            if isMultiSelectMode {
+                Text("\(selectedEntries.count) selected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
         .background(.bar)
     }
+    
+    private var breadcrumbSegments: [String] {
+        let path = viewModel.currentPath
+        if path == "/" { return ["/"] }
+        let components = path.split(separator: "/").map(String.init)
+        var segments = ["/"]
+        var current = ""
+        for comp in components {
+            current += "/" + comp
+            segments.append(comp)
+        }
+        return segments
+    }
+    
+    private func navigateToBreadcrumb(_ segment: String) {
+        if segment == "/" {
+            Task { await viewModel.load(path: "/") }
+        } else {
+            let idx = breadcrumbSegments.firstIndex(of: segment) ?? 0
+            let targetPath = breadcrumbSegments[1...idx].joined(separator: "/")
+            Task { await viewModel.load(path: "/" + targetPath) }
+        }
+    }
+
+    private var filteredAndSortedEntries: [SFTPEntry] {
+        var entries = viewModel.entries
+        
+        // Filter by search text
+        if !searchText.isEmpty {
+            entries = entries.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        }
+        
+        // Sort
+        switch sortOrder {
+        case .nameAsc:
+            entries.sort { $0.name.localizedCompare($1.name) == .orderedAscending }
+        case .nameDesc:
+            entries.sort { $0.name.localizedCompare($1.name) == .orderedDescending }
+        case .sizeAsc:
+            entries.sort { $0.size < $1.size }
+        case .sizeDesc:
+            entries.sort { $0.size > $1.size }
+        case .dateAsc:
+            entries.sort { ($0.modifiedAt ?? Date.distantPast) < ($1.modifiedAt ?? Date.distantPast) }
+        case .dateDesc:
+            entries.sort { ($0.modifiedAt ?? Date.distantPast) > ($1.modifiedAt ?? Date.distantPast) }
+        }
+        
+        return entries
+    }
+
+enum SortOrder: String, CaseIterable, Identifiable {
+    case nameAsc = "Name ↑"
+    case nameDesc = "Name ↓"
+    case sizeAsc = "Size ↑"
+    case sizeDesc = "Size ↓"
+    case dateAsc = "Date ↑"
+    case dateDesc = "Date ↓"
+    var id: String { rawValue }
 }
 
 private struct SFTPEntryRow: View {
     let entry: SFTPEntry
+    let isSelected: Bool
+    let isMultiSelectMode: Bool
+    let onTap: () -> Void
+    let onDownload: () -> Void
 
     var body: some View {
         HStack {
+            if isMultiSelectMode {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? .blue : .secondary)
+                    .font(.title2)
+            }
             Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
                 .foregroundStyle(entry.isDirectory ? .blue : .secondary)
             VStack(alignment: .leading) {
@@ -214,7 +401,17 @@ private struct SFTPEntryRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if !entry.isDirectory && !isMultiSelectMode {
+                Button(action: onDownload) {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
     }
 }
 

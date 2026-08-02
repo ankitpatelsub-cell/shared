@@ -17,6 +17,7 @@ final class SessionHistoryStore: ObservableObject {
     @Published private(set) var records: [SessionHistoryRecord] = []
 
     private let fileURL: URL
+    private let maxRecords = 500 // Increased from 100
 
     private init() {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -30,14 +31,15 @@ final class SessionHistoryStore: ObservableObject {
     }
 
     func record(_ session: TerminalViewModel) {
-        let transcript = String(session.plainTextTranscript.suffix(500_000))
+        // Save full transcript (up to 1M chars) instead of truncating to 500K
+        let transcript = String(session.plainTextTranscript.suffix(1_000_000))
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         records.insert(SessionHistoryRecord(
             id: UUID(), hostID: session.host.id, hostLabel: session.host.label,
             workspaceName: session.activeWorkspace?.displayName, startedAt: session.startedAt,
             endedAt: Date(), transcript: transcript, isBookmarked: false
         ), at: 0)
-        records = Array(records.prefix(100))
+        records = Array(records.prefix(maxRecords))
         save()
     }
 
