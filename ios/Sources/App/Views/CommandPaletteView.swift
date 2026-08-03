@@ -25,23 +25,23 @@ struct CommandPaletteView: View {
 
         // Add hosts
         for host in hosts {
-            items.append(.host(host))
+            items.append(CommandItem.host(host))
         }
 
         // Add snippets
         for snippet in snippets {
-            items.append(.snippet(snippet))
+            items.append(CommandItem.snippet(snippet))
         }
 
         // Add actions
-        items.append(.action(.newSession, "New Session", "plus.circle"))
-        items.append(.action(.openSettings, "Settings", "gear"))
-        items.append(.action(.openKeys, "SSH Keys", "key"))
+        items.append(CommandItem.action(action: .newSession, title: "New Session", icon: "plus.circle"))
+        items.append(CommandItem.action(action: .openSettings, title: "Settings", icon: "gear"))
+        items.append(CommandItem.action(action: .openKeys, title: "SSH Keys", icon: "key"))
 
         // Add new tab actions for each host with active sessions
         for session in sessionStore.sessions {
             if session.activeWorkspace == nil {
-                items.append(.newTabForHost(session.host))
+                items.append(CommandItem.newTabForHost(session.host))
             }
         }
 
@@ -49,7 +49,7 @@ struct CommandPaletteView: View {
 
         let query = searchText.lowercased()
         return items.filter { item in
-            switch item {
+            switch item.type {
             case .host(let host):
                 return host.label.lowercased().contains(query) ||
                        host.address.lowercased().contains(query) ||
@@ -110,7 +110,7 @@ struct CommandPaletteView: View {
     }
 
     private func handleSelection(_ item: CommandItem) {
-        switch item {
+        switch item.type {
         case .host(let host):
             onAction(.openHost(host))
         case .snippet(let snippet):
@@ -124,12 +124,12 @@ struct CommandPaletteView: View {
     }
 }
 
-private struct CommandItem: Identifiable {
+struct CommandItem: Identifiable {
     let id = UUID()
     enum ItemType {
         case host(Host)
         case snippet(Snippet)
-        case action(CommandPaletteView.CommandAction, title: String, icon: String)
+        case action(CommandAction, title: String, icon: String)
         case newTabForHost(Host)
     }
     let type: ItemType
@@ -142,7 +142,7 @@ private struct CommandItem: Identifiable {
         CommandItem(type: .snippet(snippet))
     }
 
-    static func action(_ action: CommandPaletteView.CommandAction, title: String, icon: String) -> CommandItem {
+    static func action(action: CommandAction, title: String, icon: String) -> CommandItem {
         CommandItem(type: .action(action, title: title, icon: icon))
     }
 
