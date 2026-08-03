@@ -163,7 +163,11 @@ struct SSHConfigParser {
     
     /// Parse SSH config from default location (~/.ssh/config)
     static func parseDefault() throws -> (hosts: [ParsedHost], identities: [ParsedIdentity]) {
+        #if os(macOS)
         let home = FileManager.default.homeDirectoryForCurrentUser
+        #else
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        #endif
         let configURL = home.appendingPathComponent(".ssh/config")
         return try parseFile(at: configURL)
     }

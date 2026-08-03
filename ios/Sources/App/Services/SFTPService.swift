@@ -90,32 +90,35 @@ actor SFTPService {
         let file = try await sftp.openFile(filePath: remotePath, flags: .read)
         
         // Get file size
-        let attrs = try await file.attributes()
+        let attrs = try await file.stat()
         let totalSize = Int64(attrs.size ?? 0)
         var bytesRead: Int64 = 0
         
         let outputStream = OutputStream(url: localURL, append: false)!
         outputStream.open()
-        defer { outputStream.close() }
         
         let bufferSize = 64 * 1024 // 64KB chunks
+        var buffer = ByteBufferAllocator().buffer(capacity: bufferSize)
         
         while true {
-            let chunk = try await file.read(from: UInt64(bytesRead), length: UInt32(bufferSize))
-            if chunk.readableBytes == 0 { break }
+            let read = try await file.read(into: &buffer, count: bufferSize)
+            if read == 0 { break }
             
-            let data = chunk.readBytes(length: chunk.readableBytes)!
+            let data = buffer.readBytes(length: read)!
             data.withUnsafeBytes { rawBuffer in
-                _ = outputStream.write(rawBuffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: chunk.readableBytes)
+                _ = outputStream.write(rawBuffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: read)
             }
             
-            bytesRead += Int64(chunk.readableBytes)
+            bytesRead += Int64(read)
             if totalSize > 0 {
                 progressHandler?(Double(bytesRead) / Double(totalSize))
             }
+            
+            buffer.clear()
         }
         
-        try? file.close()
+        outputStream.close()
+        try? await file.close()
     }
     
     func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String, progressHandler: ((Double) -> Void)? = nil) async throws {
@@ -144,7 +147,7 @@ actor SFTPService {
             }
         }
         
-        try? file.close()
+        try? await file.close()
     }
 
     func createDirectory(hostID: UUID, sshClient: SSHClient, path: String) async throws {
