@@ -377,7 +377,7 @@ struct TerminalScreenView: View {
         }
     }
 
-    private func handleCommandPaletteAction(_ action: CommandPaletteView.CommandAction) {
+    private func handleCommandPaletteAction(_ action: CommandAction) {
         switch action {
         case .openHost(let host):
             let _ = sessionStore.open(host: host, identity: nil)
