@@ -87,18 +87,21 @@ actor SFTPService {
 
     func download(hostID: UUID, sshClient: SSHClient, remotePath: String, to localURL: URL, progressHandler: ((Double) -> Void)? = nil) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
-        let file = try await sftp.openFile(filePath: remotePath, flags: .read)
         
-        // Get file size
-        let attrs = try await file.stat()
+        // Get file size using sftp stat
+        let attrs = try await sftp.stat(atPath: remotePath)
         let totalSize = Int64(attrs.size ?? 0)
         var bytesRead: Int64 = 0
         
         let outputStream = OutputStream(url: localURL, append: false)!
         outputStream.open()
+        defer { outputStream.close() }
         
         let bufferSize = 64 * 1024 // 64KB chunks
         var buffer = ByteBufferAllocator().buffer(capacity: bufferSize)
+        
+        let file = try await sftp.openFile(filePath: remotePath, flags: .read)
+        defer { try? file.close() }
         
         while true {
             let read = try await file.read(into: &buffer, count: bufferSize)
@@ -116,9 +119,6 @@ actor SFTPService {
             
             buffer.clear()
         }
-        
-        outputStream.close()
-        try? await file.close()
     }
     
     func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String, progressHandler: ((Double) -> Void)? = nil) async throws {
