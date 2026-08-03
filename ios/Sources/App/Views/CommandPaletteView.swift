@@ -1,6 +1,15 @@
 import SwiftUI
 import SwiftData
 
+enum CommandAction {
+    case openHost(Host)
+    case openSnippet(Snippet)
+    case newTabForHost(Host)
+    case openSettings
+    case openKeys
+    case newSession
+}
+
 struct CommandPaletteView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var sessionStore: SessionStore
@@ -10,15 +19,6 @@ struct CommandPaletteView: View {
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
     var onAction: (CommandAction) -> Void
-
-    enum CommandAction {
-        case openHost(Host)
-        case openSnippet(Snippet)
-        case newTabForHost(Host)
-        case openSettings
-        case openKeys
-        case newSession
-    }
 
     var filteredItems: [CommandItem] {
         var items: [CommandItem] = []
@@ -57,7 +57,7 @@ struct CommandPaletteView: View {
             case .snippet(let snippet):
                 return snippet.name.lowercased().contains(query) ||
                        snippet.command.lowercased().contains(query)
-            case .action(_, let title, _):
+            case .action(let action, let title, _):
                 return title.lowercased().contains(query)
             case .newTabForHost(let host):
                 return "New Tab \(host.label)".lowercased().contains(query) ||
