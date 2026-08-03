@@ -106,7 +106,7 @@ actor SFTPService {
         var offset = 0
         while offset < buffer.readableBytes {
             let chunkSize = min(bufferSize, buffer.readableBytes - offset)
-            let chunk = buffer.getSlice(at: offset, length: chunkSize)!
+            var chunk = buffer.getSlice(at: offset, length: chunkSize)!
             offset += chunkSize
             
             let data = chunk.readBytes(length: chunk.readableBytes)!
@@ -130,18 +130,18 @@ actor SFTPService {
         var bytesWritten: Int64 = 0
         
         let chunkSize = 64 * 1024
-        var offset = 0
         
         try await sftp.withFile(filePath: remotePath, flags: [.write, .create, .truncate]) { file in
-            while offset < data.count {
-                let chunkEnd = min(offset + chunkSize, data.count)
-                let chunk = data[offset..<chunkEnd]
+            var localOffset = 0
+            while localOffset < data.count {
+                let chunkEnd = min(localOffset + chunkSize, data.count)
+                let chunk = data[localOffset..<chunkEnd]
                 var buffer = ByteBufferAllocator().buffer(capacity: chunk.count)
                 buffer.writeBytes(chunk)
                 
                 try await file.write(buffer)
                 
-                offset = chunkEnd
+                localOffset = chunkEnd
                 bytesWritten += Int64(chunk.count)
                 if totalSize > 0 {
                     progressHandler?(Double(bytesWritten) / Double(totalSize))
