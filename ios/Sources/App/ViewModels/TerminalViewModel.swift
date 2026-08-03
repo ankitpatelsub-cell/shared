@@ -140,8 +140,8 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             // Transcript persistence - save periodically to survive crashes
             private var transcriptSaveTask: Task<Void, Never>? = nil
             private let transcriptSaveInterval: TimeInterval = 30 // seconds
-            private let maxTranscriptSize = 2_000_000 // 2M chars (increased from 1M)
-            private let transcriptTrimSize = 1_000_000 // trim to 1M (increased from 500K)
+            private let maxTranscriptSize = 5_000_000 // 5M chars (increased from 2M)
+            private let transcriptTrimSize = 2_500_000 // trim to 2.5M (increased from 1M)
 
             init(
                 host: Host, identity: Identity?, jumpHosts: [SSHJumpHop] = [],

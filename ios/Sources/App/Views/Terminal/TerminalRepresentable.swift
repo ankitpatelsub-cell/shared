@@ -26,5 +26,9 @@ struct TerminalRepresentable: UIViewRepresentable {
         view.isDirectionalLockEnabled = true
         view.keyboardDismissMode = .interactive
         view.panGestureRecognizer.minimumNumberOfTouches = 1
+        
+        // Increase scrollback buffer - SwiftTerm defaults to ~1000 lines
+        // Allow much more history for SSH sessions
+        view.scrollbackLines = 10000
     }
 }
