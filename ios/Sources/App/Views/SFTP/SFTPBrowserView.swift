@@ -428,3 +428,4 @@ private struct ProgressBanner: View {
         .padding()
     }
 }
+}
