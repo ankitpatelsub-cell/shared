@@ -89,7 +89,7 @@ actor SSHSessionManager {
             // Build chain of jump hosts
             var currentClient: SSHClient?
             
-            for (index, hop) in jumpHosts.enumerated() {
+            for (_, hop) in jumpHosts.enumerated() {
                 let hopAuthMethod = try makeAuthenticationMethod(host: hop.host, identity: hop.identity)
                 let hopSettings = SSHClientSettings(
                     host: hop.host.address,

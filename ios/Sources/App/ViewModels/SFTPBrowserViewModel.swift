@@ -137,7 +137,7 @@ final class SFTPBrowserViewModel: ObservableObject {
                     if let idx = self.transfers.firstIndex(where: { $0.id == transfer.id }) {
                         self.transfers[idx].status = .completed
                         self.transfers[idx].progress = 1.0
-                        self.load()
+                        Task { await self.load() }
                     }
                 }
             } catch {

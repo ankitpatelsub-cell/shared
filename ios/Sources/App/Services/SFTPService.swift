@@ -88,9 +88,9 @@ actor SFTPService {
     func download(hostID: UUID, sshClient: SSHClient, remotePath: String, to localURL: URL, progressHandler: ((Double) -> Void)? = nil) async throws {
         let sftp = try await client(for: hostID, sshClient: sshClient)
         let file = try await sftp.openFile(filePath: remotePath, flags: .read)
-        defer { try? file.close() }
         
-        let attrs = try await file.stat()
+        // Get file size
+        let attrs = try await file.attributes()
         let totalSize = Int64(attrs.size ?? 0)
         var bytesRead: Int64 = 0
         
@@ -99,24 +99,23 @@ actor SFTPService {
         defer { outputStream.close() }
         
         let bufferSize = 64 * 1024 // 64KB chunks
-        var buffer = ByteBufferAllocator().buffer(capacity: bufferSize)
         
         while true {
-            let read = try await file.read(into: &buffer, count: bufferSize)
-            if read == 0 { break }
+            let chunk = try await file.read(from: UInt64(bytesRead), length: UInt32(bufferSize))
+            if chunk.readableBytes == 0 { break }
             
-            let data = buffer.readBytes(length: read)!
+            let data = chunk.readBytes(length: chunk.readableBytes)!
             data.withUnsafeBytes { rawBuffer in
-                _ = outputStream.write(rawBuffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: read)
+                _ = outputStream.write(rawBuffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: chunk.readableBytes)
             }
             
-            bytesRead += Int64(read)
+            bytesRead += Int64(chunk.readableBytes)
             if totalSize > 0 {
                 progressHandler?(Double(bytesRead) / Double(totalSize))
             }
-            
-            buffer.clear()
         }
+        
+        try? file.close()
     }
     
     func upload(hostID: UUID, sshClient: SSHClient, localURL: URL, remotePath: String, progressHandler: ((Double) -> Void)? = nil) async throws {
@@ -126,7 +125,6 @@ actor SFTPService {
         var bytesWritten: Int64 = 0
         
         let file = try await sftp.openFile(filePath: remotePath, flags: [.write, .create, .truncate])
-        defer { try? file.close() }
         
         let chunkSize = 64 * 1024
         var offset = 0
@@ -145,6 +143,8 @@ actor SFTPService {
                 progressHandler?(Double(bytesWritten) / Double(totalSize))
             }
         }
+        
+        try? file.close()
     }
 
     func createDirectory(hostID: UUID, sshClient: SSHClient, path: String) async throws {

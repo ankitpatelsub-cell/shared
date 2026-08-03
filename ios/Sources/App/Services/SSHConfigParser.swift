@@ -170,7 +170,11 @@ struct SSHConfigParser {
     
     private static func expandTilde(_ path: String) -> String {
         if path.hasPrefix("~/") {
+            #if os(macOS)
             let home = FileManager.default.homeDirectoryForCurrentUser.path
+            #else
+            let home = NSHomeDirectory()
+            #endif
             return home + path.dropFirst()
         }
         return path

@@ -162,7 +162,7 @@ struct SSHConfigImportView: View {
     }
     
     private func importSelected() {
-        let hostsToImport = parsedHosts.filter { selectedHosts.contains($0.id) }
+        _ = parsedHosts.filter { selectedHosts.contains($0.id) }
         // TODO: Convert to actual Host/Identity models and save
         // This would integrate with CloudVaultService or local SwiftData context
         dismiss()

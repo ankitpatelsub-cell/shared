@@ -197,7 +197,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             font = UIFont.monospacedSystemFont(ofSize: terminalFontSize, weight: .regular)
         }
         terminalView.font = font
-        terminalView.cursorBlink = cursorBlink
+        // terminalView.cursorBlink = cursorBlink  // Not available in SwiftTerm
         // Theme colors would be applied here based on terminalThemeName
         applyTerminalTheme()
         saveTerminalSettings()
@@ -740,6 +740,7 @@ private extension ConnectionStatus {
     }
 }
 
+@MainActor
 extension TerminalViewModel: TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = applyPendingModifier(to: Array(data))
