@@ -49,7 +49,21 @@ struct SFTPBrowserView: View {
             .background(.bar)
             
             List {
-                ForEach(filteredAndSortedEntries) { entry in
+                // Pinned folders section
+                if !viewModel.pinnedFolders.isEmpty {
+                    Section("Pinned Folders") {
+                        ForEach(viewModel.pinnedFolders.sorted(), id: \.self) { path in
+                            PinnedFolderRow(path: path, onTap: {
+                                Task { await viewModel.load(path: path) }
+                            }, onUnpin: {
+                                viewModel.togglePin(path)
+                            })
+                        }
+                    }
+                }
+                
+                Section("Files") {
+                    ForEach(filteredAndSortedEntries) { entry in
                     SFTPEntryRow(
                         entry: entry,
                         isSelected: selectedEntries.contains(entry.id),
@@ -80,6 +94,9 @@ struct SFTPBrowserView: View {
                                         Button(tool.title) { onLaunch(entry.path, tool) }
                                     }
                                 }
+                            }
+                            Button(viewModel.isPinned(entry.path) ? "Unpin" : "Pin") {
+                                viewModel.togglePin(entry.path)
                             }
                             Button("Rename") {
                                 renameText = entry.name
@@ -426,6 +443,36 @@ private struct ProgressBanner: View {
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .padding()
+    }
+}
+
+private struct PinnedFolderRow: View {
+    let path: String
+    let onTap: () -> Void
+    let onUnpin: () -> Void
+
+    var body: some View {
+        HStack {
+            Image(systemName: "folder.fill.badge.plus")
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading) {
+                Text(path.split(separator: "/").last.map(String.init) ?? path)
+                    .font(.headline)
+                Text(path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button(action: onUnpin) {
+                Image(systemName: "pin.slash")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 }
 }

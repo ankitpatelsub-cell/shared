@@ -13,6 +13,10 @@ final class SFTPBrowserViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var transferProgressText: String?
     
+    // Pinned folders (persisted per-host)
+    @Published var pinnedFolders: Set<String> = []
+    private let pinnedFoldersKey: String
+    
     // Background transfer queue
     @Published var transfers: [TransferItem] = []
     private var activeTransfers: [UUID: Task<Void, Never>] = [:]
@@ -21,6 +25,34 @@ final class SFTPBrowserViewModel: ObservableObject {
         self.host = host
         self.connectionID = connectionID
         self.sshClient = sshClient
+        self.pinnedFoldersKey = "dev.termvault.sftp.pinnedFolders.\(host.id.uuidString)"
+        loadPinnedFolders()
+    }
+    
+    private func loadPinnedFolders() {
+        if let data = UserDefaults.standard.data(forKey: pinnedFoldersKey),
+           let folders = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            pinnedFolders = folders
+        }
+    }
+    
+    private func savePinnedFolders() {
+        if let data = try? JSONEncoder().encode(pinnedFolders) {
+            UserDefaults.standard.set(data, forKey: pinnedFoldersKey)
+        }
+    }
+    
+    func isPinned(_ path: String) -> Bool {
+        pinnedFolders.contains(path)
+    }
+    
+    func togglePin(_ path: String) {
+        if pinnedFolders.contains(path) {
+            pinnedFolders.remove(path)
+        } else {
+            pinnedFolders.insert(path)
+        }
+        savePinnedFolders()
     }
     
     struct TransferItem: Identifiable, Equatable {
