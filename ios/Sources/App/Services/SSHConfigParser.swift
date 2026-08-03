@@ -283,16 +283,3 @@ private class IdentityBuilder {
         )
     }
 }
-
-// MARK: - Models needed for parser (minimal)
-
-enum HostAuthMethod: String, Codable {
-    case password
-    case privateKey
-    case none
-}
-
-enum IdentityKeyType: String, Codable {
-    case ed25519
-    case rsa4096
-}
