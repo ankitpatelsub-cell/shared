@@ -29,7 +29,7 @@ struct SFTPBrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             breadcrumbBar
-            
+
             // Search bar & Sort picker
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -47,7 +47,7 @@ struct SFTPBrowserView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(.bar)
-            
+
             List {
                 // Pinned folders section
                 if !viewModel.pinnedFolders.isEmpty {
@@ -61,52 +61,53 @@ struct SFTPBrowserView: View {
                         }
                     }
                 }
-                
+
                 Section("Files") {
                     ForEach(filteredAndSortedEntries) { entry in
-                    SFTPEntryRow(
-                        entry: entry,
-                        isSelected: selectedEntries.contains(entry.id),
-                        isMultiSelectMode: isMultiSelectMode,
-                        onTap: {
-                            if isMultiSelectMode {
-                                toggleSelection(entry.id)
-                            } else {
-                                Task { await viewModel.open(entry) }
+                        SFTPEntryRow(
+                            entry: entry,
+                            isSelected: selectedEntries.contains(entry.id),
+                            isMultiSelectMode: isMultiSelectMode,
+                            onTap: {
+                                if isMultiSelectMode {
+                                    toggleSelection(entry.id)
+                                } else {
+                                    Task { await viewModel.open(entry) }
+                                }
+                            },
+                            onDownload: {
+                                Task { downloadedURL = await viewModel.download(entry) }
                             }
-                        },
-                        onDownload: {
-                            Task { downloadedURL = await viewModel.download(entry) }
+                        )
+                        .swipeActions {
+                            if !isMultiSelectMode {
+                                Button(role: .destructive) {
+                                    deletingEntry = entry
+                                } label: { Label("Delete", systemImage: "trash") }
+                            }
                         }
-                    )
-                    .swipeActions {
-                        if !isMultiSelectMode {
-                            Button(role: .destructive) {
-                                deletingEntry = entry
-                            } label: { Label("Delete", systemImage: "trash") }
-                        }
-                    }
-                    .contextMenu {
-                        if !isMultiSelectMode {
-                            if entry.isDirectory, let onLaunch {
-                                Menu("Start Agent Here") {
-                                    ForEach(AgentTool.allCases) { tool in
-                                        Button(tool.title) { onLaunch(entry.path, tool) }
+                        .contextMenu {
+                            if !isMultiSelectMode {
+                                if entry.isDirectory, let onLaunch {
+                                    Menu("Start Agent Here") {
+                                        ForEach(AgentTool.allCases) { tool in
+                                            Button(tool.title) { onLaunch(entry.path, tool) }
+                                        }
                                     }
                                 }
-                            }
-                            Button(viewModel.isPinned(entry.path) ? "Unpin" : "Pin") {
-                                viewModel.togglePin(entry.path)
-                            }
-                            Button("Rename") {
-                                renameText = entry.name
-                                renamingEntry = entry
-                            }
-                            Button("Copy, Move or Permissions") { operatingOnEntry = entry }
-                            if !entry.isDirectory {
-                                Button("Preview / Edit") { editingFile = entry }
-                                Button("Download") {
-                                    Task { downloadedURL = await viewModel.download(entry) }
+                                Button(viewModel.isPinned(entry.path) ? "Unpin" : "Pin") {
+                                    viewModel.togglePin(entry.path)
+                                }
+                                Button("Rename") {
+                                    renameText = entry.name
+                                    renamingEntry = entry
+                                }
+                                Button("Copy, Move or Permissions") { operatingOnEntry = entry }
+                                if !entry.isDirectory {
+                                    Button("Preview / Edit") { editingFile = entry }
+                                    Button("Download") {
+                                        Task { downloadedURL = await viewModel.download(entry) }
+                                    }
                                 }
                             }
                         }
@@ -273,7 +274,7 @@ struct SFTPBrowserView: View {
             selectedEntries.insert(id)
         }
     }
-    
+
     private func downloadSelected() async {
         let entriesToDownload = filteredAndSortedEntries.filter { selectedEntries.contains($0.id) }
         for entry in entriesToDownload {
@@ -282,7 +283,7 @@ struct SFTPBrowserView: View {
         isMultiSelectMode = false
         selectedEntries.removeAll()
     }
-    
+
     private func deleteSelected() async {
         let entriesToDelete = filteredAndSortedEntries.filter { selectedEntries.contains($0.id) }
         for entry in entriesToDelete {
@@ -291,14 +292,14 @@ struct SFTPBrowserView: View {
         isMultiSelectMode = false
         selectedEntries.removeAll()
     }
-    
+
     private var breadcrumbBar: some View {
         HStack {
             Button { Task { await viewModel.goUp() } } label: {
                 Image(systemName: "chevron.up")
             }
             .disabled(viewModel.currentPath == "/")
-            
+
             // Breadcrumb path with tap-to-jump
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
@@ -321,9 +322,9 @@ struct SFTPBrowserView: View {
                 }
             }
             .lineLimit(1)
-            
+
             Spacer()
-            
+
             if isMultiSelectMode {
                 Text("\(selectedEntries.count) selected")
                     .font(.caption)
@@ -334,7 +335,7 @@ struct SFTPBrowserView: View {
         .padding(.vertical, 6)
         .background(.bar)
     }
-    
+
     private var breadcrumbSegments: [String] {
         let path = viewModel.currentPath
         if path == "/" { return ["/"] }
@@ -347,7 +348,7 @@ struct SFTPBrowserView: View {
         }
         return segments
     }
-    
+
     private func navigateToBreadcrumb(_ segment: String) {
         if segment == "/" {
             Task { await viewModel.load(path: "/") }
@@ -360,12 +361,12 @@ struct SFTPBrowserView: View {
 
     private var filteredAndSortedEntries: [SFTPEntry] {
         var entries = viewModel.entries
-        
+
         // Filter by search text
         if !searchText.isEmpty {
             entries = entries.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         }
-        
+
         // Sort
         switch sortOrder {
         case .nameAsc:
@@ -381,9 +382,10 @@ struct SFTPBrowserView: View {
         case .dateDesc:
             entries.sort { ($0.modifiedAt ?? Date.distantPast) > ($1.modifiedAt ?? Date.distantPast) }
         }
-        
+
         return entries
     }
+}
 
 enum SortOrder: String, CaseIterable, Identifiable {
     case nameAsc = "Name ↑"
@@ -474,5 +476,4 @@ private struct PinnedFolderRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
     }
-}
 }
