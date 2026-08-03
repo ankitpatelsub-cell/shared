@@ -15,6 +15,7 @@ struct TerminalScreenView: View {
     @State private var showingCloseConfirmation = false
     @State private var showingRename = false
     @State private var showingCommandPalette = false
+    @State private var showingPortForwarding = false
     @State private var renameText = ""
     @State private var fontSizeAtGestureStart: Double?
     @State private var showingFileImporter = false
@@ -145,6 +146,9 @@ struct TerminalScreenView: View {
                 handleCommandPaletteAction(action)
             }
         }
+        .sheet(isPresented: $showingPortForwarding) {
+            PortForwardingView(viewModel: viewModel)
+        }
     }
 
     private var topBar: some View {
@@ -215,6 +219,11 @@ struct TerminalScreenView: View {
                     sessionStore.openNewTab(for: viewModel.host, identity: nil)
                 } label: {
                     Label("New Tab", systemImage: "plus.rectangle.on.rectangle")
+                }
+                Button {
+                    showingPortForwarding = true
+                } label: {
+                    Label("Port Forwarding", systemImage: "network")
                 }
                 Button(role: .destructive) { showingCloseConfirmation = true } label: {
                     Label("Close Session", systemImage: "xmark")

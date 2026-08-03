@@ -1,123 +1,170 @@
-import Citadel
 import Foundation
+import Citadel
 import NIOCore
-import NIOPosix
 import NIOSSH
 
-struct PortForwardRule: Codable, Identifiable, Equatable {
-    var id = UUID()
-    var name: String
-    var hostID: UUID
-    var localPort: Int
-    var targetHost: String
-    var targetPort: Int
-}
-
-private final class TunnelRelayHandler: ChannelInboundHandler, RemovableChannelHandler {
-    typealias InboundIn = ByteBuffer
-    private let peer: Channel
-    init(peer: Channel) { self.peer = peer }
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        peer.writeAndFlush(unwrapInboundIn(data), promise: nil)
-    }
-    func channelInactive(context: ChannelHandlerContext) {
-        peer.close(promise: nil)
-        context.fireChannelInactive()
-    }
-    func errorCaught(context: ChannelHandlerContext, error: Error) {
-        peer.close(promise: nil); context.close(promise: nil)
-    }
-}
-
+/// Manages SSH port forwarding: local, dynamic (SOCKS), and remote
 actor PortForwardingService {
     static let shared = PortForwardingService()
-    private let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-    private var listeners: [UUID: Channel] = [:]
 
-    func start(rule: PortForwardRule, client: SSHClient) async throws {
-        if listeners[rule.id] != nil { return }
-        let bootstrap = ServerBootstrap(group: group)
-            .serverChannelOption(ChannelOptions.backlog, value: 64)
-            .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
-            .childChannelOption(ChannelOptions.autoRead, value: false)
-            .childChannelInitializer { inbound in
-                let ready = inbound.eventLoop.makePromise(of: Void.self)
-                Task {
-                    do {
-                        let origin: SocketAddress
-                        if let remoteAddress = inbound.remoteAddress {
-                            origin = remoteAddress
-                        } else {
-                            origin = try SocketAddress(ipAddress: "127.0.0.1", port: rule.localPort)
-                        }
-                        let remote = try await client.createDirectTCPIPChannel(
-                            using: SSHChannelType.DirectTCPIP(
-                                targetHost: rule.targetHost,
-                                targetPort: rule.targetPort,
-                                originatorAddress: origin
-                            )
-                        ) { remote in
-                            remote.pipeline.addHandler(TunnelRelayHandler(peer: inbound))
-                        }
-                        try await inbound.pipeline.addHandler(TunnelRelayHandler(peer: remote)).get()
-                        try await inbound.setOption(ChannelOptions.autoRead, value: true).get()
-                        ready.succeed(())
-                    } catch {
-                        ready.fail(error)
-                        inbound.close(promise: nil)
-                    }
+    private var activeForwards: [UUID: PortForward] = [:]
+
+    struct PortForward: Identifiable {
+        let id = UUID()
+        let type: ForwardType
+        let localPort: Int
+        let remoteHost: String?
+        let remotePort: Int?
+        let sshClient: SSHClient
+        var task: Task<Void, Never>?
+        var isRunning: Bool = true
+    }
+
+    enum ForwardType: String, Codable {
+        case local = "Local"
+        case dynamic = "Dynamic (SOCKS)"
+        case remote = "Remote"
+    }
+
+    /// Start a local port forward: localhost:localPort -> remoteHost:remotePort
+    func startLocalForward(
+        connectionID: UUID,
+        localPort: Int,
+        remoteHost: String,
+        remotePort: Int,
+        sshClient: SSHClient
+    ) async throws {
+        let forward = PortForward(
+            type: .local,
+            localPort: localPort,
+            remoteHost: remoteHost,
+            remotePort: remotePort,
+            sshClient: sshClient
+        )
+
+        forward.task = Task {
+            do {
+                try await sshClient.startTCPForward(
+                    host: remoteHost,
+                    port: remotePort,
+                    originator: "127.0.0.1",
+                    originatorPort: localPort
+                ) { inbound, outbound in
+                    // Bidirectional pipe between inbound and outbound channels
+                    await self.relayData(inbound: inbound, outbound: outbound)
                 }
-                return ready.futureResult
+            } catch {
+                await self.handleForwardError(forwardID: forward.id, error: error)
             }
-        listeners[rule.id] = try await bootstrap.bind(host: "127.0.0.1", port: rule.localPort).get()
-    }
-
-    func stop(ruleID: UUID) async {
-        guard let listener = listeners.removeValue(forKey: ruleID) else { return }
-        try? await listener.close().get()
-    }
-}
-
-@MainActor
-final class PortForwardingStore: ObservableObject {
-    static let shared = PortForwardingStore()
-    @Published private(set) var rules: [PortForwardRule] = []
-    @Published private(set) var activeRuleIDs: Set<UUID> = []
-    @Published var errorMessage: String?
-    private let defaultsKey = "dev.termvault.portForwardRules"
-
-    private init() {
-        if let data = UserDefaults.standard.data(forKey: defaultsKey),
-           let value = try? JSONDecoder().decode([PortForwardRule].self, from: data) { rules = value }
-    }
-
-    func save(_ rule: PortForwardRule) {
-        if let index = rules.firstIndex(where: { $0.id == rule.id }) { rules[index] = rule }
-        else { rules.append(rule) }
-        persist()
-    }
-
-    func delete(_ rule: PortForwardRule) {
-        Task { await PortForwardingService.shared.stop(ruleID: rule.id) }
-        activeRuleIDs.remove(rule.id); rules.removeAll { $0.id == rule.id }; persist()
-    }
-
-    func toggle(_ rule: PortForwardRule, sessionStore: SessionStore) async {
-        if activeRuleIDs.contains(rule.id) {
-            await PortForwardingService.shared.stop(ruleID: rule.id)
-            activeRuleIDs.remove(rule.id); return
         }
-        guard let session = sessionStore.sessions.first(where: { $0.host.id == rule.hostID }),
-              let client = await SSHSessionManager.shared.session(for: session.id) else {
-            errorMessage = "Connect the selected host before starting its tunnel."; return
-        }
-        do {
-            try await PortForwardingService.shared.start(rule: rule, client: client)
-            activeRuleIDs.insert(rule.id)
-        } catch { errorMessage = error.localizedDescription }
+
+        activeForwards[forward.id] = forward
     }
 
-    private func persist() {
-        if let data = try? JSONEncoder().encode(rules) { UserDefaults.standard.set(data, forKey: defaultsKey) }
+    /// Start a dynamic (SOCKS) port forward: localhost:localPort acts as SOCKS proxy
+    func startDynamicForward(
+        connectionID: UUID,
+        localPort: Int,
+        sshClient: SSHClient
+    ) async throws {
+        let forward = PortForward(
+            type: .dynamic,
+            localPort: localPort,
+            remoteHost: nil,
+            remotePort: nil,
+            sshClient: sshClient
+        )
+
+        forward.task = Task {
+            do {
+                try await sshClient.startDynamicForward(
+                    originator: "127.0.0.1",
+                    originatorPort: localPort
+                ) { inbound, outbound in
+                    await self.relayData(inbound: inbound, outbound: outbound)
+                }
+            } catch {
+                await self.handleForwardError(forwardID: forward.id, error: error)
+            }
+        }
+
+        activeForwards[forward.id] = forward
+    }
+
+    /// Start a remote port forward: remoteHost:remotePort -> localhost:localPort
+    func startRemoteForward(
+        connectionID: UUID,
+        remoteHost: String,
+        remotePort: Int,
+        localHost: String,
+        localPort: Int,
+        sshClient: SSHClient
+    ) async throws {
+        let forward = PortForward(
+            type: .remote,
+            localPort: localPort,
+            remoteHost: remoteHost,
+            remotePort: remotePort,
+            sshClient: sshClient
+        )
+
+        forward.task = Task {
+            do {
+                try await sshClient.startRemoteForward(
+                    host: remoteHost,
+                    port: remotePort
+                ) { inbound, outbound in
+                    await self.relayData(inbound: inbound, outbound: outbound)
+                }
+            } catch {
+                await self.handleForwardError(forwardID: forward.id, error: error)
+            }
+        }
+
+        activeForwards[forward.id] = forward
+    }
+
+    /// Stop a specific port forward
+    func stopForward(forwardID: UUID) async {
+        if let forward = activeForwards.removeValue(forKey: forwardID) {
+            forward.isRunning = false
+            forward.task?.cancel()
+        }
+    }
+
+    /// Stop all port forwards for a connection
+    func stopAllForConnection(connectionID: UUID) async {
+        let forwardsToStop = activeForwards.values.filter { $0.sshClient === SSHSessionManager.shared.session(for: connectionID) }
+        for forward in forwardsToStop {
+            await stopForward(forwardID: forward.id)
+        }
+    }
+
+    /// Get all active port forwards
+    func getActiveForwards() -> [PortForward] {
+        Array(activeForwards.values)
+    }
+
+    /// Relay data between two channels
+    private func relayData(inbound: SSHChannel, outbound: SSHChannel) async {
+        let inboundToOutbound = Task {
+            for try await chunk in inbound {
+                try await outbound.writeAndFlush(chunk)
+            }
+        }
+
+        let outboundToInbound = Task {
+            for try await chunk in outbound {
+                try await inbound.writeAndFlush(chunk)
+            }
+        }
+
+        // Wait for either direction to complete
+        _ = await (inboundToOutbound.value, outboundToInbound.value)
+    }
+
+    private func handleForwardError(forwardID: UUID, error: Error) async {
+        activeForwards[forwardID]?.isRunning = false
+        print("Port forward error: \(error)")
     }
 }
