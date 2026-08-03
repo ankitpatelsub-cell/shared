@@ -76,11 +76,6 @@ struct SettingsView: View {
                 }
                 Section("Integrations") {
                     NavigationLink {
-                        PortForwardingView()
-                    } label: {
-                        Label("Port Forwarding", systemImage: "arrow.left.arrow.right")
-                    }
-                    NavigationLink {
                         SSHConfigView()
                     } label: {
                         Label("SSH Config Import / Export", systemImage: "doc.text")

@@ -10,16 +10,13 @@ struct PortForwardingView: View {
     @State private var remoteHost = ""
     @State private var remotePort = ""
     @State private var errorMessage: String?
+    @State private var activeForwards: [PortForwardingService.PortForward] = []
 
     enum PortForwardType: String, CaseIterable, Identifiable {
         case local = "Local"
         case dynamic = "Dynamic (SOCKS)"
         case remote = "Remote"
         var id: String { rawValue }
-    }
-
-    private var activeForwards: [PortForwardingService.PortForward] {
-        PortForwardingService.shared.getActiveForwards().filter { $0.sshClient === SSHSessionManager.shared.session(for: viewModel.id) }
     }
 
     var body: some View {
@@ -29,10 +26,9 @@ struct PortForwardingView: View {
                     ContentUnavailableView {
                         Label("No Port Forwards", systemImage: "network")
                     } description: {
-                        Text("Add a port forward to route traffic through this SSH connection.")
+                        Text("Port forwarding is not yet supported by the Citadel SSH library.")
                     } actions: {
-                        Button("Add Port Forward") { showingAddForward = true }
-                            .buttonStyle(.borderedProminent)
+                        Button("OK") { dismiss() }
                     }
                 } else {
                     ForEach(activeForwards) { forward in
@@ -93,7 +89,9 @@ struct PortForwardingView: View {
                 }
             }
             .sheet(isPresented: $showingAddForward) {
-                AddPortForwardView(viewModel: viewModel)
+                AddPortForwardView(viewModel: viewModel, onAdd: { type, local, remoteH, remoteP in
+                    Task { await addForward(type: type, localPort: local, remoteHost: remoteH, remotePort: remoteP) }
+                })
             }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -103,13 +101,60 @@ struct PortForwardingView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .task {
+                await refreshForwards()
+            }
         }
+    }
+
+    private func addForward(type: PortForwardType, localPort: Int, remoteHost: String, remotePort: Int) async {
+        guard let sshClient = await SSHSessionManager.shared.session(for: viewModel.id) else {
+            errorMessage = "Not connected"
+            return
+        }
+
+        do {
+            switch type {
+            case .dynamic:
+                try await PortForwardingService.shared.startDynamicForward(
+                    connectionID: viewModel.id,
+                    localPort: localPort,
+                    sshClient: sshClient
+                )
+            case .local:
+                try await PortForwardingService.shared.startLocalForward(
+                    connectionID: viewModel.id,
+                    localPort: localPort,
+                    remoteHost: remoteHost,
+                    remotePort: remotePort,
+                    sshClient: sshClient
+                )
+            case .remote:
+                try await PortForwardingService.shared.startRemoteForward(
+                    connectionID: viewModel.id,
+                    remoteHost: remoteHost,
+                    remotePort: remotePort,
+                    localHost: "127.0.0.1",
+                    localPort: localPort,
+                    sshClient: sshClient
+                )
+            }
+            await refreshForwards()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshForwards() async {
+        activeForwards = PortForwardingService.shared.getActiveForwards()
+            .filter { $0.sshClient === SSHSessionManager.shared.session(for: viewModel.id) }
     }
 }
 
 private struct AddPortForwardView: View {
     @ObservedObject var viewModel: TerminalViewModel
     @Environment(\.dismiss) private var dismiss
+    var onAdd: (PortForwardingView.PortForwardType, Int, String, Int) -> Void
     @State private var forwardType: PortForwardingView.PortForwardType = .dynamic
     @State private var localPort = ""
     @State private var remoteHost = ""
@@ -162,7 +207,18 @@ private struct AddPortForwardView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        Task { await addForward() }
+                        guard let local = Int(localPort) else {
+                            errorMessage = "Invalid local port"
+                            return
+                        }
+                        let remoteH = forwardType == .dynamic ? "" : remoteHost
+                        let remoteP = forwardType == .dynamic ? 0 : (Int(remotePort) ?? 0)
+                        if forwardType != .dynamic && (remoteH.isEmpty || remoteP == 0) {
+                            errorMessage = "Invalid remote host/port"
+                            return
+                        }
+                        onAdd(forwardType, local, remoteH, remoteP)
+                        dismiss()
                     }
                     .disabled(localPort.isEmpty || (forwardType != .dynamic && (remoteHost.isEmpty || remotePort.isEmpty)))
                 }
@@ -175,57 +231,6 @@ private struct AddPortForwardView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-        }
-    }
-
-    private func addForward() async {
-        guard let port = Int(localPort) else {
-            errorMessage = "Invalid local port"
-            return
-        }
-
-        guard let sshClient = await SSHSessionManager.shared.session(for: viewModel.id) else {
-            errorMessage = "Not connected"
-            return
-        }
-
-        do {
-            switch forwardType {
-            case .dynamic:
-                try await PortForwardingService.shared.startDynamicForward(
-                    connectionID: viewModel.id,
-                    localPort: port,
-                    sshClient: sshClient
-                )
-            case .local:
-                guard let rPort = Int(remotePort), !remoteHost.isEmpty else {
-                    errorMessage = "Invalid remote host/port"
-                    return
-                }
-                try await PortForwardingService.shared.startLocalForward(
-                    connectionID: viewModel.id,
-                    localPort: port,
-                    remoteHost: remoteHost,
-                    remotePort: rPort,
-                    sshClient: sshClient
-                )
-            case .remote:
-                guard let rPort = Int(remotePort), !remoteHost.isEmpty else {
-                    errorMessage = "Invalid remote host/port"
-                    return
-                }
-                try await PortForwardingService.shared.startRemoteForward(
-                    connectionID: viewModel.id,
-                    remoteHost: remoteHost,
-                    remotePort: rPort,
-                    localHost: "127.0.0.1",
-                    localPort: port,
-                    sshClient: sshClient
-                )
-            }
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 }

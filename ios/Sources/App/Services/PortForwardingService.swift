@@ -1,9 +1,10 @@
 import Foundation
 import Citadel
 import NIOCore
-import NIOSSH
 
-/// Manages SSH port forwarding: local, dynamic (SOCKS), and remote
+/// Port forwarding stub - Citadel doesn't currently expose port forwarding APIs.
+/// This service compiles but doesn't actually create tunnels.
+/// Future enhancement: Implement via raw SSH channel operations if Citadel adds support.
 actor PortForwardingService {
     static let shared = PortForwardingService()
 
@@ -27,6 +28,7 @@ actor PortForwardingService {
     }
 
     /// Start a local port forward: localhost:localPort -> remoteHost:remotePort
+    /// Currently a stub - Citadel doesn't expose this API
     func startLocalForward(
         connectionID: UUID,
         localPort: Int,
@@ -34,64 +36,21 @@ actor PortForwardingService {
         remotePort: Int,
         sshClient: SSHClient
     ) async throws {
-        let forward = PortForward(
-            type: .local,
-            localPort: localPort,
-            remoteHost: remoteHost,
-            remotePort: remotePort,
-            sshClient: sshClient
-        )
-
-        forward.task = Task {
-            do {
-                try await sshClient.startTCPForward(
-                    host: remoteHost,
-                    port: remotePort,
-                    originator: "127.0.0.1",
-                    originatorPort: localPort
-                ) { inbound, outbound in
-                    // Bidirectional pipe between inbound and outbound channels
-                    await self.relayData(inbound: inbound, outbound: outbound)
-                }
-            } catch {
-                await self.handleForwardError(forwardID: forward.id, error: error)
-            }
-        }
-
-        activeForwards[forward.id] = forward
+        throw PortForwardingError.notSupported
     }
 
     /// Start a dynamic (SOCKS) port forward: localhost:localPort acts as SOCKS proxy
+    /// Currently a stub - Citadel doesn't expose this API
     func startDynamicForward(
         connectionID: UUID,
         localPort: Int,
         sshClient: SSHClient
     ) async throws {
-        let forward = PortForward(
-            type: .dynamic,
-            localPort: localPort,
-            remoteHost: nil,
-            remotePort: nil,
-            sshClient: sshClient
-        )
-
-        forward.task = Task {
-            do {
-                try await sshClient.startDynamicForward(
-                    originator: "127.0.0.1",
-                    originatorPort: localPort
-                ) { inbound, outbound in
-                    await self.relayData(inbound: inbound, outbound: outbound)
-                }
-            } catch {
-                await self.handleForwardError(forwardID: forward.id, error: error)
-            }
-        }
-
-        activeForwards[forward.id] = forward
+        throw PortForwardingError.notSupported
     }
 
     /// Start a remote port forward: remoteHost:remotePort -> localhost:localPort
+    /// Currently a stub - Citadel doesn't expose this API
     func startRemoteForward(
         connectionID: UUID,
         remoteHost: String,
@@ -100,28 +59,7 @@ actor PortForwardingService {
         localPort: Int,
         sshClient: SSHClient
     ) async throws {
-        let forward = PortForward(
-            type: .remote,
-            localPort: localPort,
-            remoteHost: remoteHost,
-            remotePort: remotePort,
-            sshClient: sshClient
-        )
-
-        forward.task = Task {
-            do {
-                try await sshClient.startRemoteForward(
-                    host: remoteHost,
-                    port: remotePort
-                ) { inbound, outbound in
-                    await self.relayData(inbound: inbound, outbound: outbound)
-                }
-            } catch {
-                await self.handleForwardError(forwardID: forward.id, error: error)
-            }
-        }
-
-        activeForwards[forward.id] = forward
+        throw PortForwardingError.notSupported
     }
 
     /// Stop a specific port forward
@@ -134,37 +72,25 @@ actor PortForwardingService {
 
     /// Stop all port forwards for a connection
     func stopAllForConnection(connectionID: UUID) async {
-        let forwardsToStop = activeForwards.values.filter { $0.sshClient === SSHSessionManager.shared.session(for: connectionID) }
-        for forward in forwardsToStop {
-            await stopForward(forwardID: forward.id)
-        }
+        // Stub - no actual forwards to stop
     }
 
     /// Get all active port forwards
     func getActiveForwards() -> [PortForward] {
         Array(activeForwards.values)
     }
+}
 
-    /// Relay data between two channels
-    private func relayData(inbound: SSHChannel, outbound: SSHChannel) async {
-        let inboundToOutbound = Task {
-            for try await chunk in inbound {
-                try await outbound.writeAndFlush(chunk)
-            }
+enum PortForwardingError: Error, LocalizedError {
+    case notSupported
+    case connectionFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .notSupported:
+            return "Port forwarding not yet supported by Citadel SSH library"
+        case .connectionFailed:
+            return "Failed to establish port forward"
         }
-
-        let outboundToInbound = Task {
-            for try await chunk in outbound {
-                try await inbound.writeAndFlush(chunk)
-            }
-        }
-
-        // Wait for either direction to complete
-        _ = await (inboundToOutbound.value, outboundToInbound.value)
-    }
-
-    private func handleForwardError(forwardID: UUID, error: Error) async {
-        activeForwards[forwardID]?.isRunning = false
-        print("Port forward error: \(error)")
     }
 }
