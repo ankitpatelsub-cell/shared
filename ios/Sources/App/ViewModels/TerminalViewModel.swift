@@ -742,7 +742,7 @@ private extension ConnectionStatus {
 
 @MainActor
 extension TerminalViewModel: TerminalViewDelegate {
-    nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = applyPendingModifier(to: Array(data))
         if UserDefaults.standard.object(forKey: "dev.termvault.settings.pasteProtection") as? Bool ?? true,
            bytes.count > 1, bytes.contains(0x0A) || bytes.contains(0x0D) {
