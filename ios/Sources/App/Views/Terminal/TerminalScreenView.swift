@@ -14,6 +14,7 @@ struct TerminalScreenView: View {
     @State private var showingTranscript = false
     @State private var showingCloseConfirmation = false
     @State private var showingRename = false
+    @State private var showingCommandPalette = false
     @State private var renameText = ""
     @State private var fontSizeAtGestureStart: Double?
     @State private var showingFileImporter = false
@@ -139,6 +140,11 @@ struct TerminalScreenView: View {
         } message: {
             Text(attachmentMessage ?? "")
         }
+        .sheet(isPresented: $showingCommandPalette) {
+            CommandPaletteView(isPresented: $showingCommandPalette) { action in
+                handleCommandPaletteAction(action)
+            }
+        }
     }
 
     private var topBar: some View {
@@ -204,6 +210,12 @@ struct TerminalScreenView: View {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                     }
                 }
+                Divider()
+                Button {
+                    sessionStore.openNewTab(for: viewModel.host, identity: nil)
+                } label: {
+                    Label("New Tab", systemImage: "plus.rectangle.on.rectangle")
+                }
                 Button(role: .destructive) { showingCloseConfirmation = true } label: {
                     Label("Close Session", systemImage: "xmark")
                 }
@@ -211,6 +223,15 @@ struct TerminalScreenView: View {
                 topBarIcon("ellipsis")
             }
             .accessibilityLabel("Session Actions")
+
+            // Command palette button
+            Button {
+                showingCommandPalette = true
+            } label: {
+                topBarIcon("command")
+            }
+            .accessibilityLabel("Command Palette")
+            .keyboardShortcut("k", modifiers: [.command])
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -265,6 +286,12 @@ struct TerminalScreenView: View {
             }
             Button { sessionStore.move(viewModel, by: 1) } label: {
                 Label("Move Session Right", systemImage: "arrow.right")
+            }
+            Divider()
+            Button {
+                sessionStore.openNewTab(for: viewModel.host, identity: nil)
+            } label: {
+                Label("New Tab for This Host", systemImage: "plus.rectangle.on.rectangle")
             }
         }
     }
@@ -347,6 +374,23 @@ struct TerminalScreenView: View {
         switch viewModel.status {
         case .disconnected, .failed: return true
         case .connecting, .connected: return false
+        }
+    }
+
+    private func handleCommandPaletteAction(_ action: CommandPaletteView.CommandAction) {
+        switch action {
+        case .openHost(let host):
+            let _ = sessionStore.open(host: host, identity: nil)
+        case .openSnippet(let snippet):
+            viewModel.sendRawBytes(Array(snippet.command.utf8))
+        case .newTabForHost(let host):
+            let _ = sessionStore.openNewTab(for: host, identity: nil)
+        case .newSession:
+            navigationStore.navigate(to: .hosts)
+        case .openSettings:
+            navigationStore.navigate(to: .settings)
+        case .openKeys:
+            navigationStore.navigate(to: .keys)
         }
     }
 }

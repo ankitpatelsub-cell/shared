@@ -10,27 +10,6 @@ final class SessionStore: ObservableObject {
     var connectionSnippetCommands: [String] = []
     private var connectionHosts: [Host] = []
     private var connectionIdentities: [Identity] = []
-    
-    func configureConnectionCatalog(hosts: [Host], identities: [Identity]) {
-        connectionHosts = hosts
-        connectionIdentities = identities
-    }
-    
-    private func buildJumpHosts(for host: Host) -> [SSHJumpHop] {
-        var hops: [SSHJumpHop] = []
-        var currentJumpHostID = host.jumpHostID
-        
-        // Follow the chain of jump hosts
-        while let jumpHostID = currentJumpHostID,
-              let jumpHost = connectionHosts.first(where: { $0.id == jumpHostID }) {
-            let jumpIdentity = connectionIdentities.first { $0.id == jumpHost.identityID }
-            hops.append(SSHJumpHop(host: jumpHost, identity: jumpIdentity))
-            currentJumpHostID = jumpHost.jumpHostID
-        }
-        
-        return hops
-    }
-
     private let preferencesKey = "dev.termvault.sessionPreferences"
 
     private struct SessionPreference: Codable {
@@ -39,12 +18,42 @@ final class SessionStore: ObservableObject {
         var order: Int
     }
 
+    private func buildJumpHosts(for host: Host) -> [SSHJumpHop] {
+        var hops: [SSHJumpHop] = []
+        var currentJumpHostID = host.jumpHostID
+
+        // Follow the chain of jump hosts
+        while let jumpHostID = currentJumpHostID,
+              let jumpHost = connectionHosts.first(where: { $0.id == jumpHostID }) {
+            let jumpIdentity = connectionIdentities.first { $0.id == jumpHost.identityID }
+            hops.append(SSHJumpHop(host: jumpHost, identity: jumpIdentity))
+            currentJumpHostID = jumpHost.jumpHostID
+        }
+
+        return hops
+    }
+
+    func configureConnectionCatalog(hosts: [Host], identities: [Identity]) {
+        connectionHosts = hosts
+        connectionIdentities = identities
+    }
+
     @discardableResult
     func open(host: Host, identity: Identity?) -> TerminalViewModel {
-        if let existing = sessions.first(where: { $0.host.id == host.id && $0.activeWorkspace == nil }) {
-            activeSessionID = existing.id
-            return existing
-        }
+        let jumpHosts = buildJumpHosts(for: host)
+        let viewModel = TerminalViewModel(host: host, identity: identity, jumpHosts: jumpHosts)
+        viewModel.connectionSnippetCommands = connectionSnippetCommands
+        applyPreference(to: viewModel)
+        sessions.append(viewModel)
+        sortSessions()
+        activeSessionID = viewModel.id
+        Task { await viewModel.connect() }
+        return viewModel
+    }
+
+    @discardableResult
+    func openNewTab(for host: Host, identity: Identity?) -> TerminalViewModel {
+        // Always create a new tab for the same host
         let jumpHosts = buildJumpHosts(for: host)
         let viewModel = TerminalViewModel(host: host, identity: identity, jumpHosts: jumpHosts)
         viewModel.connectionSnippetCommands = connectionSnippetCommands
