@@ -110,6 +110,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published var customTitle: String?
     @Published var isPinned = false
     @Published private(set) var isViewingHistory = false
+    @Published private(set) var scrollPosition: Double = 1.0
         @Published private(set) var attachmentUploadProgress: String?
         var connectionSnippetCommands: [String] = []
     
@@ -777,6 +778,9 @@ extension TerminalViewModel: TerminalViewDelegate {
     func scrolled(source: TerminalView, position: Double) {
         let visibleBottom = source.contentOffset.y + source.bounds.height
         isViewingHistory = visibleBottom < source.contentSize.height - 20
+
+        let totalHeight = max(source.contentSize.height - source.bounds.height, 1)
+        scrollPosition = max(0, min(1, source.contentOffset.y / totalHeight))
     }
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}

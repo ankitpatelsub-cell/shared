@@ -29,33 +29,70 @@ struct TerminalScreenView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            TerminalRepresentable(terminalView: viewModel.terminalView)
-                // Keep edge glyphs clear of the display boundary. Without a
-                // gutter, SwiftTerm's first column can be visibly clipped.
-                .padding(.horizontal, 6)
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { scale in
-                            let start = fontSizeAtGestureStart ?? fontSize
-                            fontSizeAtGestureStart = start
-                            fontSize = min(24, max(10, start * Double(scale)))
-                        }
-                        .onEnded { _ in fontSizeAtGestureStart = nil }
-                )
+            ZStack(alignment: .trailing) {
+                TerminalRepresentable(terminalView: viewModel.terminalView)
+                    // Keep edge glyphs clear of the display boundary. Without a
+                    // gutter, SwiftTerm's first column can be visibly clipped.
+                    .padding(.horizontal, 6)
+                    .simultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { scale in
+                                let start = fontSizeAtGestureStart ?? fontSize
+                                fontSizeAtGestureStart = start
+                                fontSize = min(24, max(10, start * Double(scale)))
+                            }
+                            .onEnded { _ in fontSizeAtGestureStart = nil }
+                    )
+
+                if viewModel.isViewingHistory {
+                    VStack(spacing: 2) {
+                        Rectangle()
+                            .fill(.white.opacity(0.5))
+                            .frame(width: 2, height: CGFloat(viewModel.scrollPosition * 60))
+
+                        Spacer(minLength: 0)
+                    }
+                    .frame(height: 80)
+                    .padding(.vertical, 12)
+                    .padding(.trailing, 4)
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             ExtraKeysAccessoryView(viewModel: viewModel)
         }
         .overlay(alignment: .bottomTrailing) {
             if viewModel.isViewingHistory {
-                Button {
-                    viewModel.scrollToLatestOutput()
-                } label: {
-                    Label("Latest", systemImage: "arrow.down.to.line")
-                        .font(.caption.weight(.semibold))
+                VStack(spacing: 8) {
+                    Button {
+                        viewModel.scrollPage(-1)
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+
+                    Button {
+                        viewModel.scrollToLatestOutput()
+                    } label: {
+                        VStack(spacing: 2) {
+                            Label("Latest", systemImage: "arrow.down.to.line")
+                                .font(.caption.weight(.semibold))
+                        }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(.ultraThinMaterial, in: Capsule())
+                    }
+
+                    Button {
+                        viewModel.scrollPage(1)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
                 }
                 .padding(.trailing, 12)
                 .padding(.bottom, 56)
@@ -170,7 +207,18 @@ struct TerminalScreenView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                statusBadge
+
+                HStack(spacing: 8) {
+                    statusBadge
+
+                    Text("·")
+                        .foregroundStyle(.white.opacity(0.3))
+                        .font(.caption)
+
+                    Text(viewModel.startedAt, style: .relative)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
             }
 
             Spacer(minLength: 4)
