@@ -4,6 +4,7 @@ struct SessionHistoryView: View {
     @ObservedObject private var store = SessionHistoryStore.shared
     @State private var searchText = ""
     @State private var selected: SessionHistoryRecord?
+    @State private var selectedTag: String?
     @State private var filterBookmarked = false
 
     private var filtered: [SessionHistoryRecord] {
@@ -111,6 +112,25 @@ struct SessionHistoryView: View {
                                                 .font(.system(.caption2, design: .monospaced))
                                                 .lineLimit(1)
                                                 .foregroundStyle(.tertiary)
+
+                                            if !record.tags.isEmpty {
+                                                HStack(spacing: 4) {
+                                                    ForEach(record.tags.prefix(2), id: \.self) { tag in
+                                                        Text(tag)
+                                                            .font(.caption2)
+                                                            .padding(.horizontal, 6)
+                                                            .padding(.vertical, 2)
+                                                            .background(Color.blue.opacity(0.2))
+                                                            .foregroundStyle(.blue)
+                                                            .cornerRadius(4)
+                                                    }
+                                                    if record.tags.count > 2 {
+                                                        Text("+\(record.tags.count - 2)")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         Spacer()
@@ -202,6 +222,80 @@ struct SessionHistoryView: View {
                             .padding(.horizontal, 12)
                             .background(Color(.systemGray6))
                             .cornerRadius(8)
+
+                            Divider()
+
+                            HStack(spacing: 16) {
+                                if record.averageLatency > 0 {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Avg Latency")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("\(record.averageLatency)ms")
+                                            .font(.caption)
+                                    }
+                                }
+
+                                if record.dataTransferred > 0 {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Data")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(record.displayDataTransferred)
+                                            .font(.caption)
+                                    }
+                                }
+
+                                if record.commandCount > 0 {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Commands")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("\(record.commandCount)")
+                                            .font(.caption)
+                                    }
+                                }
+
+                                Spacer()
+                            }
+                        }
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Tags")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                ForEach(record.tags, id: \.self) { tag in
+                                    HStack(spacing: 4) {
+                                        Text(tag)
+                                            .font(.caption)
+
+                                        Button {
+                                            store.removeTag(tag, from: record)
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.caption2)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.blue.opacity(0.2))
+                                    .foregroundStyle(.blue)
+                                    .cornerRadius(4)
+                                }
+
+                                Spacer()
+                            }
+
+                            TextField("Add new tag", text: .constant(""))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption)
+                                .onSubmit {
+                                    // Tag input would go here
+                                }
                         }
 
                         Divider()

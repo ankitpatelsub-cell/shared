@@ -112,12 +112,15 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published private(set) var isViewingHistory = false
     @Published private(set) var scrollPosition: Double = 1.0
     @Published private(set) var autoReconnectStatus: String?
+    @Published private(set) var sessionDataTransferred: Int64 = 0
+    @Published private(set) var sessionCommandCount: Int = 0
         @Published private(set) var attachmentUploadProgress: String?
         var connectionSnippetCommands: [String] = []
 
         private var reconnectAttempt = 0
         private let maxReconnectAttempts = 5
         private var reconnectTask: Task<Void, Never>? = nil
+        private var latencyHistory: [Int] = []
     
         // Per-host terminal settings
         @Published var terminalFontSize: Double = 14
@@ -329,7 +332,14 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         try await SSHSessionManager.shared.send(text, connectionID: id)
         if text.hasSuffix("\n") {
             CommandHistoryStore.shared.record(text, hostID: host.id)
+            sessionCommandCount += 1
         }
+    }
+
+    var averageLatency: Int {
+        guard !latencyHistory.isEmpty else { return 0 }
+        let sum = latencyHistory.reduce(0, +)
+        return sum / latencyHistory.count
     }
 
     /// Fire-and-forget path for the extra-keys bar's fixed byte sequences
@@ -585,26 +595,33 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     /// keyboard handling remains responsive.
     private func receiveRemoteOutput(_ data: Data) {
         guard !data.isEmpty else { return }
-        
+
+        sessionDataTransferred += Int64(data.count)
+
         // Parse OSC 52 clipboard from remote
         if let clipboardText = OSCSequence.parseClipboard(from: data) {
             remoteClipboard = clipboardText
             UIPasteboard.general.string = clipboardText
         }
-        
+
         // Parse OSC 8 hyperlinks from remote
         let hyperlinks = OSCSequence.parseHyperlinks(from: data)
         if !hyperlinks.isEmpty {
             detectedHyperlinks = hyperlinks.map { (url: $0.url, id: $0.id) }
         }
-        
+
         transcript.append(String(decoding: data, as: UTF8.self))
         // Trim transcript if it exceeds max size
         if transcript.utf8.count > maxTranscriptSize {
             transcript = String(transcript.suffix(transcriptTrimSize))
         }
         if let startedAt = responseStartedAt {
-            responseLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+            let latency = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+            responseLatencyMilliseconds = latency
+            latencyHistory.append(latency)
+            if latencyHistory.count > 100 {
+                latencyHistory.removeFirst()
+            }
             responseStartedAt = nil
         }
 

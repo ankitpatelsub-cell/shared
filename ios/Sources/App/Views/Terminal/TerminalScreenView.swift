@@ -25,6 +25,8 @@ struct TerminalScreenView: View {
     @State private var showingSearch = false
     @State private var searchText = ""
     @State private var showingCommandHistory = false
+    @State private var showingMacros = false
+    @State private var showingOutputFilter = false
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
@@ -45,6 +47,12 @@ struct TerminalScreenView: View {
                                 fontSize = min(24, max(10, start * Double(scale)))
                             }
                             .onEnded { _ in fontSizeAtGestureStart = nil }
+                    )
+                    .gesture(
+                        DragGesture(minimumDistance: 50)
+                            .onEnded { value in
+                                handleSwipe(value)
+                            }
                     )
 
                 if viewModel.isViewingHistory {
@@ -222,6 +230,19 @@ struct TerminalScreenView: View {
         .sheet(isPresented: $showingCommandHistory) {
             CommandHistoryView(hostID: viewModel.host.id)
         }
+        .sheet(isPresented: $showingMacros) {
+            CommandMacroView { commands in
+                Task {
+                    for command in commands {
+                        try? await viewModel.send(command)
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingOutputFilter) {
+            OutputFilterView(transcript: viewModel.plainTextTranscript, isPresented: $showingOutputFilter)
+        }
     }
 
     private var topBar: some View {
@@ -267,8 +288,14 @@ struct TerminalScreenView: View {
                 Button { showingSearch = true } label: {
                     Label("Find in Output", systemImage: "magnifyingglass")
                 }
+                Button { showingOutputFilter = true } label: {
+                    Label("Filter Output", systemImage: "line.3.horizontal.decrease.circle")
+                }
                 Button { showingCommandHistory = true } label: {
                     Label("Command History", systemImage: "clock.arrow.circlepath")
+                }
+                Button { showingMacros = true } label: {
+                    Label("Macros", systemImage: "hammer")
                 }
                 Button { showingTranscript = true } label: {
                     Label("View Transcript", systemImage: "doc.text.magnifyingglass")
@@ -490,6 +517,29 @@ struct TerminalScreenView: View {
             navigationStore.navigate(to: .settings)
         case .openKeys:
             navigationStore.navigate(to: .keys)
+        }
+    }
+
+    private func handleSwipe(_ gesture: DragGesture.Value) {
+        let horizontalAmount = gesture.translation.width
+        let verticalAmount = gesture.translation.height
+
+        if abs(horizontalAmount) > abs(verticalAmount) {
+            if horizontalAmount > 0 {
+                // Swipe right: send Ctrl+C (interrupt)
+                viewModel.sendControlChord("c")
+            } else {
+                // Swipe left: send Ctrl+D (exit/EOF)
+                viewModel.sendControlChord("d")
+            }
+        } else {
+            if verticalAmount > 0 {
+                // Swipe down: scroll to bottom
+                viewModel.scrollToLatestOutput()
+            } else {
+                // Swipe up: scroll to top
+                viewModel.scrollPage(-5)
+            }
         }
     }
 }
