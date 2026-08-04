@@ -11,15 +11,15 @@ actor PortForwardingService {
     private var activeForwards: [UUID: PortForward] = [:]
 
     struct PortForward: Identifiable {
-        let id = UUID()
-        let type: ForwardType
-        let localPort: Int
-        let remoteHost: String?
-        let remotePort: Int?
-        let sshClient: SSHClient
-        var task: Task<Void, Never>?
-        var isRunning: Bool = true
-    }
+            let id = UUID()
+            let type: ForwardType
+            let localPort: Int
+            let remoteHost: String?
+            let remotePort: Int?
+            let sshClient: SSHClient
+            var task: Task<Void, Never>?
+            var isRunning: Bool = true
+        }
 
     enum ForwardType: String, Codable {
         case local = "Local"
