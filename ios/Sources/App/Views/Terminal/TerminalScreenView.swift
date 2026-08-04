@@ -27,7 +27,10 @@ struct TerminalScreenView: View {
     @State private var showingCommandHistory = false
     @State private var showingMacros = false
     @State private var showingOutputFilter = false
+    @State private var showingWorkspaceFavorites = false
+    @State private var showingTerminalSettings = false
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
+    @AppStorage("dev.termvault.settings.gesturesEnabled") private var gesturesEnabled = true
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
 
@@ -48,12 +51,12 @@ struct TerminalScreenView: View {
                             }
                             .onEnded { _ in fontSizeAtGestureStart = nil }
                     )
-                    .gesture(
+                    .gesture(gesturesEnabled ? AnyGesture(
                         DragGesture(minimumDistance: 50)
                             .onEnded { value in
                                 handleSwipe(value)
                             }
-                    )
+                    ) : AnyGesture(TapGesture().onEnded { }))
 
                 if viewModel.isViewingHistory {
                     VStack(spacing: 2) {
@@ -243,6 +246,12 @@ struct TerminalScreenView: View {
         .sheet(isPresented: $showingOutputFilter) {
             OutputFilterView(transcript: viewModel.plainTextTranscript, isPresented: $showingOutputFilter)
         }
+        .sheet(isPresented: $showingTerminalSettings) {
+            TerminalSettingsView()
+        }
+        .sheet(isPresented: $showingWorkspaceFavorites) {
+            WorkspaceFavoritesView()
+        }
     }
 
     private var topBar: some View {
@@ -344,6 +353,13 @@ struct TerminalScreenView: View {
                 }
                 Button(role: .destructive) { showingCloseConfirmation = true } label: {
                     Label("Close Session", systemImage: "xmark")
+                }
+                Divider()
+                Button { showingTerminalSettings = true } label: {
+                    Label("Terminal Settings", systemImage: "gear")
+                }
+                Button { showingWorkspaceFavorites = true } label: {
+                    Label("Workspace Favorites", systemImage: "star")
                 }
             } label: {
                 topBarIcon("ellipsis")

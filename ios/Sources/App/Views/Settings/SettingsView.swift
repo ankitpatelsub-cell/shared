@@ -71,9 +71,23 @@ struct SettingsView: View {
                             }
                         }
                 }
+                Section("Terminal") {
+                    NavigationLink("Terminal Settings") { TerminalSettingsView() }
+                }
+
+                Section("Workspaces") {
+                    NavigationLink("Workspace Projects") { WorkspaceProjectsView() }
+                    NavigationLink("Workspace Favorites") { WorkspaceFavoritesView() }
+                }
+
                 Section("Activity") {
                     NavigationLink("Session History") { SessionHistoryView() }
                 }
+
+                Section("Tools") {
+                    NavigationLink("File Sync") { FileSyncManagerView() }
+                }
+
                 Section("Integrations") {
                     NavigationLink {
                         SSHConfigView()
