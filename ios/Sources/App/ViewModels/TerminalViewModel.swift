@@ -111,8 +111,13 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     @Published var isPinned = false
     @Published private(set) var isViewingHistory = false
     @Published private(set) var scrollPosition: Double = 1.0
+    @Published private(set) var autoReconnectStatus: String?
         @Published private(set) var attachmentUploadProgress: String?
         var connectionSnippetCommands: [String] = []
+
+        private var reconnectAttempt = 0
+        private let maxReconnectAttempts = 5
+        private var reconnectTask: Task<Void, Never>? = nil
     
         // Per-host terminal settings
         @Published var terminalFontSize: Double = 14
@@ -282,6 +287,8 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                 }
             )
             status = .connected
+            reconnectAttempt = 0
+            autoReconnectStatus = nil
 
             // The first SwiftTerm layout often happens while the SSH PTY is
             // still being created. Re-send the measured viewport after the
@@ -320,6 +327,9 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
     func send(_ text: String) async throws {
         try await SSHSessionManager.shared.send(text, connectionID: id)
+        if text.hasSuffix("\n") {
+            CommandHistoryStore.shared.record(text, hostID: host.id)
+        }
     }
 
     /// Fire-and-forget path for the extra-keys bar's fixed byte sequences
@@ -518,18 +528,20 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         inputDrainTask = nil
         resizeTask?.cancel()
         resizeTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
         pendingInput.removeAll(keepingCapacity: true)
         attachedTmuxName = nil
-        
+
         // Record session history on explicit disconnect
         if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Task { @MainActor in
                 SessionHistoryStore.shared.record(self)
             }
         }
-        
+
         stopTranscriptAutoSave()
-        
+
         let connectionID = id
         Task { await SSHSessionManager.shared.disconnect(connectionID: connectionID) }
         status = .disconnected
@@ -718,19 +730,49 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         pendingInput.removeAll(keepingCapacity: true)
         responseStartedAt = nil
         attachedTmuxName = nil
-        
+
         // Record session history on disconnect (not just explicit close)
         if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Task { @MainActor in
                 SessionHistoryStore.shared.record(self)
             }
         }
-        
+
         stopTranscriptAutoSave()
-        
+
         if !preserveFailure {
             status = .disconnected
+            attemptAutoReconnect()
         }
+    }
+
+    private func attemptAutoReconnect() {
+        reconnectTask?.cancel()
+        guard reconnectAttempt < maxReconnectAttempts else {
+            autoReconnectStatus = nil
+            return
+        }
+
+        reconnectAttempt += 1
+        let delaySeconds = min(30, pow(2.0, Double(reconnectAttempt - 1)))
+
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            self.autoReconnectStatus = "Reconnecting in \(Int(delaySeconds))s… (attempt \(self.reconnectAttempt)/\(self.maxReconnectAttempts))"
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.autoReconnectStatus = "Reconnecting… (attempt \(self.reconnectAttempt)/\(self.maxReconnectAttempts))"
+            }
+            await self.reconnect()
+        }
+    }
+
+    func cancelAutoReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempt = 0
+        autoReconnectStatus = nil
     }
 }
 

@@ -22,6 +22,9 @@ struct TerminalScreenView: View {
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var isUploadingAttachments = false
     @State private var attachmentMessage: String?
+    @State private var showingSearch = false
+    @State private var searchText = ""
+    @State private var showingCommandHistory = false
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
@@ -106,6 +109,33 @@ struct TerminalScreenView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
+        .overlay(alignment: .top) {
+            if let status = viewModel.autoReconnectStatus {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8, anchor: .center)
+
+                    Text(status)
+                        .font(.caption.weight(.semibold))
+
+                    Spacer()
+
+                    Button {
+                        viewModel.cancelAutoReconnect()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.orange.opacity(0.15))
+                .foregroundStyle(.orange)
+                .cornerRadius(8)
+                .padding(12)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .background(Color.black)
         .toolbar(.hidden, for: .tabBar)
         .task {
@@ -186,6 +216,12 @@ struct TerminalScreenView: View {
         .sheet(isPresented: $showingPortForwarding) {
             PortForwardingView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showingSearch) {
+            TerminalSearchView(transcript: viewModel.plainTextTranscript, isPresented: $showingSearch)
+        }
+        .sheet(isPresented: $showingCommandHistory) {
+            CommandHistoryView(hostID: viewModel.host.id)
+        }
     }
 
     private var topBar: some View {
@@ -228,8 +264,14 @@ struct TerminalScreenView: View {
             Menu {
                 sessionSwitcher
                 Divider()
+                Button { showingSearch = true } label: {
+                    Label("Find in Output", systemImage: "magnifyingglass")
+                }
+                Button { showingCommandHistory = true } label: {
+                    Label("Command History", systemImage: "clock.arrow.circlepath")
+                }
                 Button { showingTranscript = true } label: {
-                    Label("Search Output", systemImage: "doc.text.magnifyingglass")
+                    Label("View Transcript", systemImage: "doc.text.magnifyingglass")
                 }
                 if !snippets.isEmpty {
                     Menu("Insert Snippet") {
@@ -449,6 +491,128 @@ struct TerminalScreenView: View {
         case .openKeys:
             navigationStore.navigate(to: .keys)
         }
+    }
+}
+
+private struct TerminalSearchView: View {
+    let transcript: String
+    @Binding var isPresented: Bool
+    @State private var searchText = ""
+    @State private var currentIndex = 0
+
+    private var searchResults: [String.SubSequence] {
+        guard !searchText.isEmpty else { return [] }
+        let lines = transcript.split(separator: "\n", omittingEmptySubsequences: false)
+        return lines.filter { $0.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var resultCount: Int {
+        searchResults.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+
+                    TextField("Find text in output", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+
+                if searchText.isEmpty {
+                    ContentUnavailableView(
+                        "Search Terminal Output",
+                        systemImage: "magnifyingglass",
+                        description: Text("Type to find text in the terminal output")
+                    )
+                } else if searchResults.isEmpty {
+                    ContentUnavailableView(
+                        "No Results",
+                        systemImage: "magnifyingglass",
+                        description: Text("No matching lines found")
+                    )
+                } else {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("\(resultCount) result\(resultCount == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(searchResults.indices, id: \.self) { index in
+                                    HighlightedSearchResult(
+                                        text: String(searchResults[index]),
+                                        searchTerm: searchText
+                                    )
+                                }
+                            }
+                            .padding()
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+            .navigationTitle("Search Output")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+    }
+}
+
+private struct HighlightedSearchResult: View {
+    let text: String
+    let searchTerm: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(highlightedText)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(3)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(Color(.systemGray6))
+                .cornerRadius(6)
+        }
+    }
+
+    private var highlightedText: AttributedString {
+        var result = AttributedString(text)
+        let searchLower = searchTerm.lowercased()
+        let textLower = text.lowercased()
+
+        var searchRange = textLower.startIndex..<textLower.endIndex
+        while let range = textLower.range(of: searchTerm, range: searchRange, options: .caseInsensitive) {
+            let attributeRange = result.range(of: String(text[range]))
+            if let attributeRange = attributeRange {
+                result[attributeRange].backgroundColor = .yellow
+                result[attributeRange].foregroundColor = .black
+            }
+            searchRange = range.upperBound..<textLower.endIndex
+        }
+
+        return result
     }
 }
 
