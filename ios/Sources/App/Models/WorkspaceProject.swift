@@ -1,11 +1,12 @@
 import Foundation
+import SwiftUI
 import SwiftData
 
 @Model
 final class WorkspaceProject {
     @Attribute(.unique) var id: UUID = UUID()
     var name: String
-    var description: String?
+    var details: String?
     var icon: String = "folder"
     var color: String = "blue"
     var createdAt: Date = Date()
@@ -13,7 +14,7 @@ final class WorkspaceProject {
 
     init(name: String, description: String? = nil, icon: String = "folder", color: String = "blue") {
         self.name = name
-        self.description = description
+        self.details = description
         self.icon = icon
         self.color = color
     }

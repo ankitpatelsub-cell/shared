@@ -38,7 +38,7 @@ struct WorkspaceProjectsView: View {
                                 Text(project.name)
                                     .fontWeight(.semibold)
 
-                                if let description = project.description {
+                                if let description = project.details {
                                     Text(description)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -158,8 +158,8 @@ struct ProjectDetailView: View {
 
                 if isEditing {
                     TextField("Description", text: Binding(
-                        get: { project.description ?? "" },
-                        set: { project.description = $0.isEmpty ? nil : $0 }
+                        get: { project.details ?? "" },
+                        set: { project.details = $0.isEmpty ? nil : $0 }
                     ), axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .frame(height: 80)
