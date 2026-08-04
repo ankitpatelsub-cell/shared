@@ -17,7 +17,7 @@ struct TerminalSettingsView: View {
                         ForEach(TerminalTheme.allThemes, id: \.name) { theme in
                             HStack(spacing: 8) {
                                 Circle()
-                                    .fill(theme.uiBackground)
+                                    .fill(Color(uiColor: theme.uiBackground))
                                     .frame(width: 16, height: 16)
                                 Text(theme.name)
                             }
@@ -136,7 +136,7 @@ struct TerminalSettingsView: View {
                     }
                     .frame(minHeight: 60)
                     .padding()
-                    .background(theme.uiBackground)
+                    .background(Color(uiColor: theme.uiBackground))
                     .cornerRadius(8)
                 }
             }
