@@ -25,7 +25,7 @@ final class SessionRecoveryManager: ObservableObject {
     func startRecovery(reconnectAction: @escaping () async throws -> Void) {
         reconnectTask?.cancel()
 
-        reconnectTask = Task {
+        reconnectTask = Task(priority: .userInitiated) {
             for attempt in 1...maxReconnectAttempts {
                 self.recoveryState = .reconnecting(attempt: attempt, maxAttempts: self.maxReconnectAttempts)
                 self.statusMessage = "Attempting to reconnect... (\(attempt)/\(self.maxReconnectAttempts))"
