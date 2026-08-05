@@ -5,7 +5,7 @@ import os.log
 final class ErrorLogger {
     static let shared = ErrorLogger()
 
-    enum ErrorCategory: String {
+    enum ErrorCategory: String, Codable {
         case network = "Network"
         case authentication = "Authentication"
         case hostKey = "Host Key"
