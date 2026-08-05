@@ -271,7 +271,7 @@ struct NewProjectView: View {
                     Button("Create") {
                         let project = WorkspaceProject(
                             name: name,
-                            description: description.isEmpty ? nil : description,
+                            details: description.isEmpty ? nil : description,
                             icon: selectedIcon,
                             color: selectedColor
                         )

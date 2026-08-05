@@ -12,7 +12,7 @@ struct TermVaultApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     private var sharedModelContainer: ModelContainer = {
-        let schema = Schema([Host.self, Identity.self, Snippet.self])
+        let schema = Schema([Host.self, Identity.self, Snippet.self, WorkspaceProject.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             return try ModelContainer(for: schema, configurations: [configuration])

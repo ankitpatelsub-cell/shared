@@ -12,9 +12,9 @@ final class WorkspaceProject {
     var createdAt: Date = Date()
     var workspaceIDs: [UUID] = []
 
-    init(name: String, description: String? = nil, icon: String = "folder", color: String = "blue") {
+    init(name: String, details: String? = nil, icon: String = "folder", color: String = "blue") {
         self.name = name
-        self.details = description
+        self.details = details
         self.icon = icon
         self.color = color
     }
