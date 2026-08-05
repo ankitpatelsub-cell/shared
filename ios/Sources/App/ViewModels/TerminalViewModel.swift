@@ -801,7 +801,7 @@ private extension ConnectionStatus {
 }
 
 @MainActor
-extension TerminalViewModel: TerminalViewDelegate {
+extension TerminalViewModel: @preconcurrency TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = applyPendingModifier(to: Array(data))
         let pasteProtectionEnabled = UserDefaults.standard.object(forKey: "dev.termvault.settings.pasteProtection") as? Bool ?? true
