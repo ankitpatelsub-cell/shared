@@ -50,12 +50,7 @@ struct TerminalScreenView: View {
                             }
                             .onEnded { _ in fontSizeAtGestureStart = nil }
                     )
-                    .gesture(gesturesEnabled ? AnyGesture(
-                        DragGesture(minimumDistance: 50)
-                            .onEnded { value in
-                                handleSwipe(value)
-                            }
-                    ) : AnyGesture(TapGesture().onEnded { }))
+                    .modifier(GestureModifier(gesturesEnabled: gesturesEnabled, onSwipe: handleSwipe))
 
                 if viewModel.isViewingHistory {
                     VStack(spacing: 2) {
@@ -555,6 +550,19 @@ struct TerminalScreenView: View {
                 // Swipe up: scroll to top
                 viewModel.scrollPage(-5)
             }
+        }
+    }
+}
+
+private struct GestureModifier: ViewModifier {
+    let gesturesEnabled: Bool
+    let onSwipe: (DragGesture.Value) -> Void
+
+    func body(content: Content) -> some View {
+        if gesturesEnabled {
+            content.gesture(DragGesture(minimumDistance: 50).onEnded(onSwipe))
+        } else {
+            content
         }
     }
 }
