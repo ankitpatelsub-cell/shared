@@ -14,7 +14,7 @@ final class SessionRecoveryManager: ObservableObject {
     @Published var statusMessage: String = ""
 
     private let maxReconnectAttempts = 5
-    private var reconnectTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Error>?
 
     private func exponentialBackoffDelay(attempt: Int) -> TimeInterval {
         let maxDelay: TimeInterval = 30.0
@@ -25,7 +25,7 @@ final class SessionRecoveryManager: ObservableObject {
     func startRecovery(reconnectAction: @escaping () async throws -> Void) {
         reconnectTask?.cancel()
 
-        reconnectTask = Task(priority: .userInitiated) {
+        reconnectTask = Task {
             for attempt in 1...maxReconnectAttempts {
                 self.recoveryState = .reconnecting(attempt: attempt, maxAttempts: self.maxReconnectAttempts)
                 self.statusMessage = "Attempting to reconnect... (\(attempt)/\(self.maxReconnectAttempts))"
