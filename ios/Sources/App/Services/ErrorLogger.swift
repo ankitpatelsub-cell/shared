@@ -13,13 +13,22 @@ final class ErrorLogger {
         case general = "General"
     }
 
-    struct LogEntry: Identifiable {
-        let id = UUID()
+    struct LogEntry: Identifiable, Codable {
+        let id: UUID
         let timestamp: Date
         let category: ErrorCategory
         let message: String
         let technicalDetails: String?
         let suggestion: String?
+
+        init(id: UUID = UUID(), timestamp: Date, category: ErrorCategory, message: String, technicalDetails: String? = nil, suggestion: String? = nil) {
+            self.id = id
+            self.timestamp = timestamp
+            self.category = category
+            self.message = message
+            self.technicalDetails = technicalDetails
+            self.suggestion = suggestion
+        }
     }
 
     private let logger = OSLog(subsystem: "dev.termvault", category: "errors")
@@ -138,4 +147,3 @@ extension ErrorLogger {
     }
 }
 
-extension ErrorLogger.LogEntry: Codable {}

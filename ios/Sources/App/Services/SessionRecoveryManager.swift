@@ -17,7 +17,7 @@ final class SessionRecoveryManager: ObservableObject {
     private let initialDelay: TimeInterval = 2.0
     private var reconnectTask: Task<Void, Never>?
 
-    nonisolated private func exponentialBackoffDelay(attempt: Int) -> TimeInterval {
+    private func exponentialBackoffDelay(attempt: Int) -> TimeInterval {
         let maxDelay: TimeInterval = 30.0
         let delay = pow(2.0, Double(attempt - 1))
         return min(delay * 2, maxDelay)
@@ -42,11 +42,11 @@ final class SessionRecoveryManager: ObservableObject {
                     return
                 } catch {
                     if attempt < self.maxReconnectAttempts {
-                        let delay = nonisolated { self.exponentialBackoffDelay(attempt: attempt) }()
+                        let delay = self.exponentialBackoffDelay(attempt: attempt)
                         await MainActor.run {
                             self.statusMessage = "Reconnecting in \(Int(delay))s... (\(attempt)/\(self.maxReconnectAttempts))"
                         }
-                        try await Task.sleep(for: .seconds(delay))
+                        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     }
                 }
             }
