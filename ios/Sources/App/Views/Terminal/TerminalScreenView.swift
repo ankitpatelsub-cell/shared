@@ -34,13 +34,12 @@ struct TerminalScreenView: View {
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
 
-    var body: some View {
+    @ViewBuilder
+    private var mainContent: some View {
         VStack(spacing: 0) {
             topBar
             ZStack(alignment: .trailing) {
                 TerminalRepresentable(terminalView: viewModel.terminalView)
-                    // Keep edge glyphs clear of the display boundary. Without a
-                    // gutter, SwiftTerm's first column can be visibly clipped.
                     .padding(.horizontal, 6)
                     .simultaneousGesture(
                         MagnificationGesture()
@@ -63,7 +62,6 @@ struct TerminalScreenView: View {
                         Rectangle()
                             .fill(.white.opacity(0.5))
                             .frame(width: 2, height: CGFloat(viewModel.scrollPosition * 60))
-
                         Spacer(minLength: 0)
                     }
                     .frame(height: 80)
@@ -77,40 +75,7 @@ struct TerminalScreenView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if viewModel.isViewingHistory {
-                VStack(spacing: 8) {
-                    Button {
-                        viewModel.scrollPage(-1)
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.caption.weight(.semibold))
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(.ultraThinMaterial))
-                    }
-
-                    Button {
-                        viewModel.scrollToLatestOutput()
-                    } label: {
-                        VStack(spacing: 2) {
-                            Label("Latest", systemImage: "arrow.down.to.line")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    }
-
-                    Button {
-                        viewModel.scrollPage(1)
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.caption.weight(.semibold))
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(.ultraThinMaterial))
-                    }
-                }
-                .padding(.trailing, 12)
-                .padding(.bottom, 56)
-                .transition(.scale.combined(with: .opacity))
+                scrollControlsOverlay
             }
         }
         .overlay {
@@ -122,32 +87,66 @@ struct TerminalScreenView: View {
         }
         .overlay(alignment: .top) {
             if let status = viewModel.autoReconnectStatus {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.8, anchor: .center)
-
-                    Text(status)
-                        .font(.caption.weight(.semibold))
-
-                    Spacer()
-
-                    Button {
-                        viewModel.cancelAutoReconnect()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.caption)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.orange.opacity(0.15))
-                .foregroundStyle(.orange)
-                .cornerRadius(8)
-                .padding(12)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                autoReconnectOverlay
             }
         }
-        .background(Color.black)
+    }
+
+    @ViewBuilder
+    private var scrollControlsOverlay: some View {
+        VStack(spacing: 8) {
+            Button { viewModel.scrollPage(-1) } label: {
+                Image(systemName: "arrow.up")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.ultraThinMaterial))
+            }
+            Button { viewModel.scrollToLatestOutput() } label: {
+                VStack(spacing: 2) {
+                    Label("Latest", systemImage: "arrow.down.to.line")
+                        .font(.caption.weight(.semibold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            Button { viewModel.scrollPage(1) } label: {
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.ultraThinMaterial))
+            }
+        }
+        .padding(.trailing, 12)
+        .padding(.bottom, 56)
+        .transition(.scale.combined(with: .opacity))
+    }
+
+    @ViewBuilder
+    private var autoReconnectOverlay: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.8, anchor: .center)
+            Text(viewModel.autoReconnectStatus ?? "")
+                .font(.caption.weight(.semibold))
+            Spacer()
+            Button { viewModel.cancelAutoReconnect() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.15))
+        .foregroundStyle(.orange)
+        .cornerRadius(8)
+        .padding(12)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    var body: some View {
+        mainContent
+            .background(Color.black)
         .toolbar(.hidden, for: .tabBar)
         .task {
             applyFontSize()
@@ -669,7 +668,7 @@ private struct HighlightedSearchResult: View {
         let textLower = text.lowercased()
 
         var searchRange = textLower.startIndex..<textLower.endIndex
-        while let range = textLower.range(of: searchTerm, range: searchRange, options: .caseInsensitive) {
+        while let range = textLower.range(of: searchTerm, options: .caseInsensitive, range: searchRange) {
             let attributeRange = result.range(of: String(text[range]))
             if let attributeRange = attributeRange {
                 result[attributeRange].backgroundColor = .yellow
