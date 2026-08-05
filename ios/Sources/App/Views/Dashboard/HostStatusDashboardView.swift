@@ -40,11 +40,9 @@ struct HostStatusDashboardView: View {
                                     .fontWeight(.semibold)
 
                                 HStack(spacing: 8) {
-                                    if let host_addr = host.hostName {
-                                        Text(host_addr)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Text(host.address)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
 
                                     if let session = activeSession {
                                         Label(

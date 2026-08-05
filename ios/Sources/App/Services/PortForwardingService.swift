@@ -65,7 +65,6 @@ actor PortForwardingService {
     /// Stop a specific port forward
     func stopForward(forwardID: UUID) async {
         if let forward = activeForwards.removeValue(forKey: forwardID) {
-            forward.isRunning = false
             forward.task?.cancel()
         }
     }
