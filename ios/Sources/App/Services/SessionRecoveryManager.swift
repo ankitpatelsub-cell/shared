@@ -14,7 +14,6 @@ final class SessionRecoveryManager: ObservableObject {
     @Published var statusMessage: String = ""
 
     private let maxReconnectAttempts = 5
-    private let initialDelay: TimeInterval = 2.0
     private var reconnectTask: Task<Void, Never>?
 
     private func exponentialBackoffDelay(attempt: Int) -> TimeInterval {
@@ -26,35 +25,27 @@ final class SessionRecoveryManager: ObservableObject {
     func startRecovery(reconnectAction: @escaping () async throws -> Void) {
         reconnectTask?.cancel()
 
-        reconnectTask = Task<Void, Never> {
+        reconnectTask = Task {
             for attempt in 1...maxReconnectAttempts {
-                await MainActor.run {
-                    self.recoveryState = .reconnecting(attempt: attempt, maxAttempts: self.maxReconnectAttempts)
-                    self.statusMessage = "Attempting to reconnect... (\(attempt)/\(self.maxReconnectAttempts))"
-                }
+                self.recoveryState = .reconnecting(attempt: attempt, maxAttempts: self.maxReconnectAttempts)
+                self.statusMessage = "Attempting to reconnect... (\(attempt)/\(self.maxReconnectAttempts))"
 
                 do {
                     try await reconnectAction()
-                    await MainActor.run {
-                        self.recoveryState = .recovered
-                        self.statusMessage = "Reconnected successfully"
-                    }
+                    self.recoveryState = .recovered
+                    self.statusMessage = "Reconnected successfully"
                     return
                 } catch {
                     if attempt < self.maxReconnectAttempts {
                         let delay = self.exponentialBackoffDelay(attempt: attempt)
-                        await MainActor.run {
-                            self.statusMessage = "Reconnecting in \(Int(delay))s... (\(attempt)/\(self.maxReconnectAttempts))"
-                        }
+                        self.statusMessage = "Reconnecting in \(Int(delay))s... (\(attempt)/\(self.maxReconnectAttempts))"
                         try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     }
                 }
             }
 
-            await MainActor.run {
-                self.recoveryState = .failed(error: "Failed to reconnect after \(self.maxReconnectAttempts) attempts")
-                self.statusMessage = "Reconnection failed"
-            }
+            self.recoveryState = .failed(error: "Failed to reconnect after \(self.maxReconnectAttempts) attempts")
+            self.statusMessage = "Reconnection failed"
         }
     }
 
