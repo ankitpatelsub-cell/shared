@@ -8,6 +8,7 @@ struct TerminalSettingsView: View {
     @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
     @AppStorage("dev.termvault.settings.gesturesEnabled") private var gesturesEnabled = true
     @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
+    @State private var autoApproveSettings = AutoApproveSettings.shared
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,14 @@ struct TerminalSettingsView: View {
                 Section("Input") {
                     Toggle("Paste Protection", isOn: $pasteProtection)
                         .help("Warn before pasting multiple lines")
+
+                    if !pasteProtection {
+                        Toggle("Auto-Approve Multi-line Paste", isOn: Binding(
+                            get: { autoApproveSettings.autoApproveMultilinePaste },
+                            set: { autoApproveSettings.autoApproveMultilinePaste = $0 }
+                        ))
+                        .help("Automatically approve pasting multiple lines without prompting")
+                    }
 
                     Toggle("Extended Keys", isOn: $extendedKeys)
                         .help("Show additional keyboard shortcuts")
@@ -119,6 +128,20 @@ struct TerminalSettingsView: View {
                             }
                         }
                         .padding(.vertical, 8)
+                    }
+                }
+
+                Section("Approvals") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Auto-Approve SSH Host Keys", isOn: Binding(
+                            get: { autoApproveSettings.autoApproveHostKeys },
+                            set: { autoApproveSettings.autoApproveHostKeys = $0 }
+                        ))
+                        .help("Automatically trust new SSH host keys on first connection")
+
+                        Text("Enable this mode when running automated SSH operations or when Claude/Codex needs to approve connections without user interaction.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

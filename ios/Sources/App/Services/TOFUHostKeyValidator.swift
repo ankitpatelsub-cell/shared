@@ -26,11 +26,13 @@ final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate {
     private let host: String
     private let port: Int
     private let store: HostKeyStore
+    private let autoApproveSettings: AutoApproveSettings
 
-    init(host: String, port: Int, store: HostKeyStore = .shared) {
+    init(host: String, port: Int, store: HostKeyStore = .shared, autoApproveSettings: AutoApproveSettings = .shared) {
         self.host = host
         self.port = port
         self.store = store
+        self.autoApproveSettings = autoApproveSettings
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
