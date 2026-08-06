@@ -18,6 +18,7 @@ struct TerminalScreenView: View {
     @State private var showingPortForwarding = false
     @State private var renameText = ""
     @State private var fontSizeAtGestureStart: Double?
+    @State private var scrollRepeatTask: Task<Void, Never>?
     @State private var showingFileImporter = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var isUploadingAttachments = false
@@ -90,12 +91,16 @@ struct TerminalScreenView: View {
     @ViewBuilder
     private var scrollControlsOverlay: some View {
         VStack(spacing: 8) {
-            Button { viewModel.scrollPage(-1) } label: {
-                Image(systemName: "arrow.up")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.ultraThinMaterial))
-            }
+            Image(systemName: "arrow.up")
+                .font(.caption.weight(.semibold))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(.ultraThinMaterial))
+                .contentShape(Circle())
+                .accessibilityLabel("Scroll up")
+                .accessibilityAddTraits(.isButton)
+                .pressAndHoldToRepeat { startRepeatingScroll(direction: -1) } onRelease: {
+                    stopRepeatingScroll()
+                }
             Button { viewModel.scrollToLatestOutput() } label: {
                 VStack(spacing: 2) {
                     Label("Latest", systemImage: "arrow.down.to.line")
@@ -105,16 +110,41 @@ struct TerminalScreenView: View {
                 .padding(.vertical, 7)
                 .background(.ultraThinMaterial, in: Capsule())
             }
-            Button { viewModel.scrollPage(1) } label: {
-                Image(systemName: "arrow.down")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.ultraThinMaterial))
-            }
+            Image(systemName: "arrow.down")
+                .font(.caption.weight(.semibold))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(.ultraThinMaterial))
+                .contentShape(Circle())
+                .accessibilityLabel("Scroll down")
+                .accessibilityAddTraits(.isButton)
+                .pressAndHoldToRepeat { startRepeatingScroll(direction: 1) } onRelease: {
+                    stopRepeatingScroll()
+                }
         }
         .padding(.trailing, 12)
         .padding(.bottom, 56)
         .transition(.scale.combined(with: .opacity))
+    }
+
+    // Standard "press and hold to repeat" behavior (as used for stepper/scrub
+    // controls system-wide): the first scroll happens immediately on touch-down
+    // so a quick tap still behaves like the old single-tap button, then after a
+    // short delay it keeps scrolling every 120ms until the finger lifts.
+    private func startRepeatingScroll(direction: Int) {
+        guard scrollRepeatTask == nil else { return }
+        viewModel.scrollPage(direction)
+        scrollRepeatTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            while !Task.isCancelled {
+                viewModel.scrollPage(direction)
+                try? await Task.sleep(for: .milliseconds(120))
+            }
+        }
+    }
+
+    private func stopRepeatingScroll() {
+        scrollRepeatTask?.cancel()
+        scrollRepeatTask = nil
     }
 
     @ViewBuilder
@@ -150,6 +180,7 @@ struct TerminalScreenView: View {
                 await viewModel.reconnect()
             }
         }
+        .onDisappear { stopRepeatingScroll() }
         .onChange(of: fontSize) { _, _ in applyFontSize() }
         .onChange(of: terminalFont) { _, _ in applyFontSize() }
         .onChange(of: terminalTheme) { _, _ in applyTerminalTheme() }
@@ -551,6 +582,20 @@ struct TerminalScreenView: View {
                 viewModel.scrollPage(-5)
             }
         }
+    }
+}
+
+private extension View {
+    /// Fires `onPress` the instant the finger goes down and `onRelease` when it
+    /// lifts (or the touch is cancelled) — `DragGesture(minimumDistance: 0)` is
+    /// the standard SwiftUI way to get press/release edges on a plain view
+    /// without a `Button` fighting a second gesture recognizer for the touch.
+    func pressAndHoldToRepeat(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> some View {
+        gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in onPress() }
+                .onEnded { _ in onRelease() }
+        )
     }
 }
 
