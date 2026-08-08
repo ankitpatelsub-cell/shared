@@ -9,6 +9,10 @@ struct FileSyncRecord: Codable, Identifiable, Equatable {
     let lastSyncedAt: Date?
     let autoSync: Bool
     let ignorePatterns: [String] // .gitignore style patterns
+    // Security-scoped bookmark for `localPath`, captured when it was chosen
+    // via the folder browser — resolve this (not the raw path string) to
+    // regain access to a location outside the app sandbox on a later launch.
+    var localBookmarkData: Data? = nil
 
     enum SyncDirection: String, Codable {
         case localToRemote = "l2r"
@@ -52,7 +56,8 @@ final class FileSyncService: ObservableObject {
         remotePath: String,
         direction: FileSyncRecord.SyncDirection,
         autoSync: Bool = false,
-        ignorePatterns: [String] = []
+        ignorePatterns: [String] = [],
+        localBookmarkData: Data? = nil
     ) {
         let record = FileSyncRecord(
             id: UUID(),
@@ -62,7 +67,8 @@ final class FileSyncService: ObservableObject {
             direction: direction,
             lastSyncedAt: nil,
             autoSync: autoSync,
-            ignorePatterns: ignorePatterns
+            ignorePatterns: ignorePatterns,
+            localBookmarkData: localBookmarkData
         )
         syncRecords.append(record)
         save()
@@ -84,7 +90,8 @@ final class FileSyncService: ObservableObject {
             direction: updated.direction,
             lastSyncedAt: Date(),
             autoSync: updated.autoSync,
-            ignorePatterns: updated.ignorePatterns
+            ignorePatterns: updated.ignorePatterns,
+            localBookmarkData: updated.localBookmarkData
         )
         syncRecords[index] = updated
         save()

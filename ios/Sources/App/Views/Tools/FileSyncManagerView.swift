@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftData
+import UniformTypeIdentifiers
 
 struct FileSyncManagerView: View {
     @ObservedObject private var syncService = FileSyncService.shared
@@ -235,25 +237,72 @@ struct FileSyncDetailView: View {
 struct NewFileSyncView: View {
     @Binding var isPresented: Bool
     @ObservedObject private var syncService = FileSyncService.shared
+    @Query(sort: \Host.label) private var hosts: [Host]
+
+    @State private var selectedHostID: UUID?
     @State private var localPath = ""
+    @State private var localBookmarkData: Data?
     @State private var remotePath = ""
     @State private var direction: FileSyncRecord.SyncDirection = .bidirectional
     @State private var autoSync = false
+    @State private var showingLocalPicker = false
+    @State private var showingRemotePicker = false
+    @State private var localPickerError: String?
+
+    private var selectedHost: Host? {
+        hosts.first { $0.id == selectedHostID }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Host") {
+                    Picker("Host", selection: $selectedHostID) {
+                        Text("Select a host").tag(UUID?.none)
+                        ForEach(hosts) { host in
+                            Text(host.label).tag(Optional(host.id))
+                        }
+                    }
+                }
+
                 Section("Paths") {
-                    HStack {
-                        Image(systemName: "macbook")
-                            .foregroundStyle(.blue)
-                        TextField("Local Path", text: $localPath)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "iphone")
+                                .foregroundStyle(.blue)
+                            TextField("Local Path", text: $localPath)
+                        }
+                        Button {
+                            showingLocalPicker = true
+                        } label: {
+                            Label("Browse…", systemImage: "folder")
+                                .font(.caption)
+                        }
+                        if let localPickerError {
+                            Text(localPickerError)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
 
-                    HStack {
-                        Image(systemName: "server.rack")
-                            .foregroundStyle(.blue)
-                        TextField("Remote Path", text: $remotePath)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "server.rack")
+                                .foregroundStyle(.blue)
+                            TextField("Remote Path", text: $remotePath)
+                        }
+                        Button {
+                            showingRemotePicker = true
+                        } label: {
+                            Label("Browse…", systemImage: "folder")
+                                .font(.caption)
+                        }
+                        .disabled(selectedHost == nil)
+                        if selectedHost == nil {
+                            Text("Select a host above to browse its filesystem.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -277,16 +326,41 @@ struct NewFileSyncView: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Create") {
+                        guard let selectedHostID else { return }
                         syncService.addSyncRecord(
-                            hostID: UUID(), // This would be passed as parameter
+                            hostID: selectedHostID,
                             localPath: localPath,
                             remotePath: remotePath,
                             direction: direction,
-                            autoSync: autoSync
+                            autoSync: autoSync,
+                            localBookmarkData: localBookmarkData
                         )
                         isPresented = false
                     }
-                    .disabled(localPath.isEmpty || remotePath.isEmpty)
+                    .disabled(localPath.isEmpty || remotePath.isEmpty || selectedHostID == nil)
+                }
+            }
+        }
+        .fileImporter(isPresented: $showingLocalPicker, allowedContentTypes: [.folder]) { result in
+            switch result {
+            case .success(let url):
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    localBookmarkData = try url.bookmarkData(options: [])
+                    localPath = url.path
+                    localPickerError = nil
+                } catch {
+                    localPickerError = "Couldn't save access to that folder: \(error.localizedDescription)"
+                }
+            case .failure(let error):
+                localPickerError = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showingRemotePicker) {
+            if let selectedHost {
+                RemoteDirectoryPickerView(host: selectedHost) { path in
+                    remotePath = path
                 }
             }
         }

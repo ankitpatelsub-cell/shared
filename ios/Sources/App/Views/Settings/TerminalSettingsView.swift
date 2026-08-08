@@ -46,12 +46,18 @@ struct TerminalSettingsView: View {
                     Toggle("Paste Protection", isOn: $pasteProtection)
                         .help("Warn before pasting multiple lines")
 
-                    if !pasteProtection {
+                    // Auto-approve is only ever consulted while Paste Protection
+                    // is on (see TerminalViewModel.send: the whole prompt check
+                    // is skipped entirely once protection is off) — so this
+                    // control has to show when protection is ON, not off, or
+                    // there's no way to reach the one setting combination that
+                    // actually skips the prompt.
+                    if pasteProtection {
                         Toggle("Auto-Approve Multi-line Paste", isOn: Binding(
                             get: { autoApproveSettings.autoApproveMultilinePaste },
                             set: { autoApproveSettings.autoApproveMultilinePaste = $0 }
                         ))
-                        .help("Automatically approve pasting multiple lines without prompting")
+                        .help("Skip the confirmation and paste multi-line input immediately")
                     }
 
                     Toggle("Extended Keys", isOn: $extendedKeys)

@@ -20,6 +20,7 @@ struct TerminalScreenView: View {
     @State private var fontSizeAtGestureStart: Double?
     @State private var scrollRepeatTask: Task<Void, Never>?
     @State private var showingFileImporter = false
+    @State private var showingPhotosPicker = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var isUploadingAttachments = false
     @State private var attachmentMessage: String?
@@ -188,6 +189,13 @@ struct TerminalScreenView: View {
             guard !items.isEmpty else { return }
             Task { await uploadPhotos(items) }
         }
+        // A `PhotosPicker` placed directly inside a `Menu` (as this was)
+        // doesn't reliably present on iOS — the menu swallows the tap
+        // before the picker's own presentation can run. Trigger it instead
+        // via a plain Button inside the menu setting `showingPhotosPicker`,
+        // with the actual picker attached out here, same pattern as the
+        // file importer below.
+        .photosPicker(isPresented: $showingPhotosPicker, selection: $selectedPhotos, maxSelectionCount: 5, matching: .images)
         .fileImporter(
             isPresented: $showingFileImporter,
             allowedContentTypes: [.item],
@@ -347,7 +355,7 @@ struct TerminalScreenView: View {
                     Label("Attach File", systemImage: "paperclip")
                 }
                 .accessibilityHint("Uploads a local file to the connected host and inserts its path")
-                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 5, matching: .images) {
+                Button { showingPhotosPicker = true } label: {
                     Label("Attach Photo", systemImage: "photo")
                 }
                 .accessibilityHint("Uploads photos to the connected host and inserts their paths")
