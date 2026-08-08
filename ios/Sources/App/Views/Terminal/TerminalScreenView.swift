@@ -10,7 +10,6 @@ struct TerminalScreenView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var navigationStore: AppNavigationStore
     @Environment(\.dismiss) private var dismiss
-    @State private var showingSFTP = false
     @State private var showingTranscript = false
     @State private var showingCloseConfirmation = false
     @State private var showingRename = false
@@ -163,6 +162,30 @@ struct TerminalScreenView: View {
         }
     }
 
+    // Routes through SessionStore.openSFTP — the same tracked path
+    // WorkspaceBrowserTabView uses — instead of the old SFTPGateView sheet,
+    // which built its own untracked SFTPBrowserViewModel. That divergence
+    // meant pinned folders, in-flight transfers, and the current path all
+    // reset every time the sheet was dismissed and reopened, and it never
+    // got the "launch Codex/Claude here" buttons the tracked path has.
+    private func browseFiles() {
+        let key = "sftp:\(viewModel.id.uuidString)"
+        if let existing = sessionStore.sessions.first(where: { $0.sftp?.persistenceKey == key }) {
+            sessionStore.activeSessionID = existing.id
+            return
+        }
+        Task {
+            for _ in 0..<50 {
+                if let sshClient = await SSHSessionManager.shared.session(for: viewModel.id) {
+                    sessionStore.openSFTP(host: viewModel.host, connectionID: viewModel.id, sshClient: sshClient)
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+    }
+
     @ViewBuilder
     private var autoReconnectOverlay: some View {
         HStack(spacing: 8) {
@@ -213,18 +236,6 @@ struct TerminalScreenView: View {
             switch result {
             case .success(let urls): Task { await uploadSecurityScopedFiles(urls) }
             case .failure(let error): attachmentMessage = error.localizedDescription
-            }
-        }
-        .sheet(isPresented: $showingSFTP) {
-            NavigationStack {
-                SFTPGateView(host: viewModel.host, connectionID: viewModel.id)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button { showingSFTP = false } label: {
-                                Label("Back", systemImage: "chevron.left")
-                            }
-                        }
-                    }
             }
         }
         .sheet(isPresented: $showingTranscript) {
@@ -331,7 +342,7 @@ struct TerminalScreenView: View {
 
             Spacer(minLength: 4)
 
-            topBarButton("folder") { showingSFTP = true }
+            topBarButton("folder") { browseFiles() }
                 .accessibilityLabel("Browse remote files")
             agentModeMenu
 

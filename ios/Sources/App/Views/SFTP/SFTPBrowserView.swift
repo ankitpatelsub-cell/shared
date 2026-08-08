@@ -1,5 +1,4 @@
 import SwiftUI
-import Citadel
 
 struct SFTPBrowserView: View {
     @StateObject private var viewModel: SFTPBrowserViewModel
@@ -19,12 +18,6 @@ struct SFTPBrowserView: View {
     @State private var sortOrder: SortOrder = .nameAsc
     @State private var isMultiSelectMode = false
     @State private var selectedEntries: Set<UUID> = []
-
-    init(host: Host, connectionID: UUID, sshClient: SSHClient, onLaunch: ((String, AgentTool) -> Void)? = nil, onLaunchPreset: ((String, AgentPreset) -> Void)? = nil) {
-        _viewModel = StateObject(wrappedValue: SFTPBrowserViewModel(host: host, connectionID: connectionID, sshClient: sshClient))
-        self.onLaunch = onLaunch
-        self.onLaunchPreset = onLaunchPreset
-    }
 
     init(viewModel: SFTPBrowserViewModel, onLaunch: ((String, AgentTool) -> Void)? = nil, onLaunchPreset: ((String, AgentPreset) -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: viewModel)

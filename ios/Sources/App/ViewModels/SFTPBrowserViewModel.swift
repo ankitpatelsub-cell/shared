@@ -64,6 +64,10 @@ final class SFTPBrowserViewModel: ObservableObject {
         let id = UUID()
         let entry: SFTPEntry
         let isDownload: Bool
+        // Only set for uploads — needed so resumeTransfer() can re-issue
+        // the same upload; downloads always re-derive their destination
+        // from `entry.name` in the app's temp directory.
+        var localURL: URL?
         var progress: Double = 0
         var status: TransferStatus = .pending
         var speed: String = ""
@@ -98,7 +102,7 @@ final class SFTPBrowserViewModel: ObservableObject {
     func upload(localURL: URL) async {
         let remotePath = (currentPath as NSString).appendingPathComponent(localURL.lastPathComponent)
         let entry = SFTPEntry(name: localURL.lastPathComponent, path: remotePath, isDirectory: false, size: 0, permissions: "", modifiedAt: nil)
-        let transfer = TransferItem(entry: entry, isDownload: false)
+        let transfer = TransferItem(entry: entry, isDownload: false, localURL: localURL)
         transfers.append(transfer)
         await runUploadTransfer(transfer, localURL: localURL, remotePath: remotePath)
     }
@@ -226,9 +230,30 @@ final class SFTPBrowserViewModel: ObservableObject {
     
     func resumeTransfer(_ transfer: TransferItem) {
         guard let idx = transfers.firstIndex(where: { $0.id == transfer.id }) else { return }
-        if transfers[idx].status == .paused || transfers[idx].status == .failed {
+        guard transfers[idx].status == .paused || transfers[idx].status == .failed else { return }
+
+        // Neither Citadel's SFTP client nor SFTPService support resuming a
+        // partial read/write, so this restarts the transfer from byte 0 —
+        // reset the displayed progress immediately instead of leaving the
+        // old paused/failed percentage on screen until the first new
+        // progress callback overwrites it.
+        transfers[idx].progress = 0
+        transfers[idx].speed = ""
+        transfers[idx].eta = ""
+        transfers[idx].error = nil
+
+        if transfer.isDownload {
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent(transfer.entry.name)
             Task { await runTransfer(transfer, destination: destination) }
+        } else if let localURL = transfer.localURL {
+            // This used to unconditionally call runTransfer() — the
+            // download path — even for a paused/failed upload, so
+            // resuming an upload silently tried to download the remote
+            // file instead of re-sending the local one.
+            Task { await runUploadTransfer(transfer, localURL: localURL, remotePath: transfer.entry.path) }
+        } else {
+            transfers[idx].status = .failed
+            transfers[idx].error = "Can't resume: the original local file reference was lost."
         }
     }
     
