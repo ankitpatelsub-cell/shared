@@ -1,6 +1,7 @@
 import Foundation
 import Citadel
 
+@MainActor
 enum OpenSession: Identifiable {
     case terminal(TerminalViewModel)
     case sftp(SFTPBrowserViewModel)

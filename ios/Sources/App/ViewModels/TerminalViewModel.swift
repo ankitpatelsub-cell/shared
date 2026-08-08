@@ -793,7 +793,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     }
 }
 
-private extension ConnectionStatus {
+extension ConnectionStatus {
     var isFailure: Bool {
         if case .failed = self { return true }
         return false

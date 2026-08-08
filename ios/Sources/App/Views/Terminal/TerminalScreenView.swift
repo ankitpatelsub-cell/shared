@@ -148,6 +148,21 @@ struct TerminalScreenView: View {
         scrollRepeatTask = nil
     }
 
+    // Pulled out of the `.task` closure inline: the Swift 6 type checker
+    // was timing out trying to infer the combined async/boolean expression
+    // in place ("unable to type-check this expression in reasonable time").
+    private func handleAppear() async {
+        applyFontSize()
+        applyTerminalTheme()
+        // `.failed` (e.g. auto-reconnect gave up after its 5 attempts while
+        // the app sat backgrounded) was previously excluded here, so
+        // reopening a long-stale session did nothing until the user found
+        // the manual "Reconnect" menu item.
+        if viewModel.status == .disconnected || viewModel.status.isFailure {
+            await viewModel.reconnect()
+        }
+    }
+
     @ViewBuilder
     private var autoReconnectOverlay: some View {
         HStack(spacing: 8) {
@@ -174,17 +189,7 @@ struct TerminalScreenView: View {
         mainContent
             .background(Color.black)
         .toolbar(.hidden, for: .tabBar)
-        .task {
-            applyFontSize()
-            applyTerminalTheme()
-            // `.failed` (e.g. auto-reconnect gave up after its 5 attempts
-            // while the app sat backgrounded) was previously excluded here,
-            // so reopening a long-stale session did nothing until the user
-            // found the manual "Reconnect" menu item.
-            if viewModel.status == .disconnected || viewModel.status.isFailure {
-                await viewModel.reconnect()
-            }
-        }
+        .task { await handleAppear() }
         .onDisappear { stopRepeatingScroll() }
         .onChange(of: fontSize) { _, _ in applyFontSize() }
         .onChange(of: terminalFont) { _, _ in applyFontSize() }
