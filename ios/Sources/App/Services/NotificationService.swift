@@ -88,10 +88,17 @@ enum NotificationService {
         case cancelActionID: key = "Escape"
         default: return
         }
-        let name = ProjectDashboardViewModel.quote(tmuxName)
+        let name = shellQuote(tmuxName)
         _ = try? await RemoteCommandService.shared.run(
             hostID: hostID,
             command: "tmux send-keys -t \(name) \(key) 2>/dev/null || true"
         )
+    }
+
+    // Duplicated rather than reusing ProjectDashboardViewModel.quote: that
+    // type is @MainActor-isolated, and handleAction() runs off the main
+    // actor (invoked from AppDelegate's notification-response callback).
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
