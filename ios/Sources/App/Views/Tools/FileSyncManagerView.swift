@@ -4,8 +4,18 @@ import UniformTypeIdentifiers
 
 struct FileSyncManagerView: View {
     @ObservedObject private var syncService = FileSyncService.shared
+    @Query private var hosts: [Host]
+    @Query private var identities: [Identity]
     @State private var showingNewSync = false
     @State private var selectedRecord: FileSyncRecord?
+
+    private func host(for record: FileSyncRecord) -> Host? {
+        hosts.first { $0.id == record.hostID }
+    }
+
+    private func identity(for host: Host) -> Identity? {
+        identities.first { $0.id == host.identityID }
+    }
 
     var body: some View {
         NavigationStack {
@@ -77,13 +87,15 @@ struct FileSyncManagerView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
+                            guard let host = host(for: record) else { return }
                             Task {
-                                await syncService.syncNow(record)
+                                await syncService.syncNow(record, host: host, identity: identity(for: host))
                             }
                         } label: {
                             Label("Sync", systemImage: "arrow.clockwise")
                         }
                         .tint(.blue)
+                        .disabled(host(for: record) == nil)
 
                         Button(role: .destructive) {
                             syncService.removeSyncRecord(record)
@@ -119,7 +131,7 @@ struct FileSyncManagerView: View {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
                             Task {
-                                await syncService.syncAll()
+                                await syncService.syncAll(hosts: hosts, identities: identities)
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
@@ -337,7 +349,7 @@ struct NewFileSyncView: View {
                         )
                         isPresented = false
                     }
-                    .disabled(localPath.isEmpty || remotePath.isEmpty || selectedHostID == nil)
+                    .disabled(localPath.isEmpty || remotePath.isEmpty || selectedHostID == nil || localPickerError != nil)
                 }
             }
         }

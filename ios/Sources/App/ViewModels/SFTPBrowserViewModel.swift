@@ -3,9 +3,13 @@ import Citadel
 
 @MainActor
 final class SFTPBrowserViewModel: ObservableObject {
+    let id = UUID()
     let host: Host
     private let connectionID: UUID
     private let sshClient: SSHClient
+    let persistenceKey: String
+    @Published var customTitle: String?
+    @Published var isPinned = false
 
     @Published var currentPath: String = "/"
     @Published var entries: [SFTPEntry] = []
@@ -25,6 +29,7 @@ final class SFTPBrowserViewModel: ObservableObject {
         self.host = host
         self.connectionID = connectionID
         self.sshClient = sshClient
+        self.persistenceKey = "sftp:\(connectionID.uuidString)"
         self.pinnedFoldersKey = "dev.termvault.sftp.pinnedFolders.\(host.id.uuidString)"
         loadPinnedFolders()
     }
@@ -227,6 +232,11 @@ final class SFTPBrowserViewModel: ObservableObject {
         }
     }
     
+    func cancelAllTransfers() {
+        for task in activeTransfers.values { task.cancel() }
+        activeTransfers.removeAll()
+    }
+
     func cancelTransfer(_ transfer: TransferItem) {
         if let task = activeTransfers[transfer.id] {
             task.cancel()

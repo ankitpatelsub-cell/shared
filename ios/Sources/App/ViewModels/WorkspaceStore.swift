@@ -7,6 +7,8 @@ final class WorkspaceStore: ObservableObject {
     private let defaultsKey = "workspaceSessions.v1"
     private var notifiedFinishedSessions: Set<UUID> = []
     private var observedRunningSessions: Set<UUID> = []
+    private var lastPaneSnapshot: [UUID: String] = [:]
+    private var notifiedWaitingSessions: Set<UUID> = []
 
     init() {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
@@ -50,6 +52,8 @@ final class WorkspaceStore: ObservableObject {
 
     func remove(_ session: WorkspaceSession) {
         recentSessions.removeAll { $0.id == session.id }
+        lastPaneSnapshot[session.id] = nil
+        notifiedWaitingSessions.remove(session.id)
         save()
     }
 
@@ -103,10 +107,35 @@ final class WorkspaceStore: ObservableObject {
             ), !output.isEmpty else { continue }
             if output == workspace.tool.executable {
                 observedRunningSessions.insert(workspace.id)
+                await checkForIdleInput(workspace)
             } else if observedRunningSessions.contains(workspace.id) {
                 notifiedFinishedSessions.insert(workspace.id)
+                lastPaneSnapshot[workspace.id] = nil
+                notifiedWaitingSessions.remove(workspace.id)
                 await NotificationService.agentFinished(workspace)
             }
+        }
+    }
+
+    /// A running agent that hasn't changed its tmux pane content between two
+    /// consecutive 30s polls has gone quiet — almost always because it's
+    /// sitting at a prompt/confirmation waiting on the user, not because it's
+    /// still churning. Fires once per idle period; resets as soon as new
+    /// output appears so it can fire again next time it goes idle.
+    private func checkForIdleInput(_ workspace: WorkspaceSession) async {
+        let name = ProjectDashboardViewModel.quote(workspace.tmuxName)
+        guard let pane = try? await RemoteCommandService.shared.run(
+            hostID: workspace.hostID,
+            command: "tmux capture-pane -p -t \(name) 2>/dev/null | tail -c 2000 || true"
+        ) else { return }
+
+        if lastPaneSnapshot[workspace.id] == pane {
+            guard !notifiedWaitingSessions.contains(workspace.id) else { return }
+            notifiedWaitingSessions.insert(workspace.id)
+            await NotificationService.agentWaiting(workspace)
+        } else {
+            lastPaneSnapshot[workspace.id] = pane
+            notifiedWaitingSessions.remove(workspace.id)
         }
     }
 

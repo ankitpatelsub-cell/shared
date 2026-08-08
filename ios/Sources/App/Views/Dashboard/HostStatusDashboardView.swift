@@ -18,7 +18,7 @@ struct HostStatusDashboardView: View {
                 .navigationTitle("Connection Status")
             } else {
                 List(hosts) { host in
-                    let activeSession = sessionStore.sessions.first { $0.host.id == host.id }
+                    let activeSession = sessionStore.terminalSessions.first { $0.host.id == host.id }
                     let lastSession = historyStore.records.first { $0.hostID == host.id }
 
                     NavigationLink(destination: EmptyView()) {

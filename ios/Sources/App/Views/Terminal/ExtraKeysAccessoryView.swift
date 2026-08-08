@@ -25,6 +25,7 @@ struct ExtraKeysAccessoryView: View {
     @State private var showingShortcuts = false
     @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
     @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
+    @State private var backspaceRepeatTask: Task<Void, Never>?
 
     private var terminalView: TerminalView { viewModel.terminalView }
 
@@ -35,6 +36,16 @@ struct ExtraKeysAccessoryView: View {
                 keyButton("tab") { viewModel.sendRawBytes([0x09]) }
                 toggleButton("ctrl", modifier: .ctrl)
                 toggleButton("alt", modifier: .alt)
+
+                divider
+
+                // Holding this repeats DEL every 80ms (after an initial 400ms
+                // delay) the same way the scroll-page buttons repeat, so
+                // clearing a long typo doesn't mean tapping dozens of times.
+                repeatKeyButton("⌫") { startRepeatingBackspace() } onRelease: {
+                    stopRepeatingBackspace()
+                }
+                keyButton("Clear") { clearCurrentLine() }
 
                 if keyRowLayout != "compact" {
                     divider
@@ -97,6 +108,43 @@ struct ExtraKeysAccessoryView: View {
                 .frame(minWidth: 36, minHeight: 30)
         }
         .buttonStyle(KeyCapStyle(isActive: false))
+    }
+
+    private func repeatKeyButton(_ label: String, onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> some View {
+        Text(label)
+            .frame(minWidth: 36, minHeight: 30)
+            .font(.system(size: 14, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color.primary)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.controlCornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+            )
+            .contentShape(Rectangle())
+            .pressAndHoldToRepeat(onPress: onPress, onRelease: onRelease)
+    }
+
+    private func startRepeatingBackspace() {
+        guard backspaceRepeatTask == nil else { return }
+        viewModel.sendRawBytes([0x7F])
+        backspaceRepeatTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            while !Task.isCancelled {
+                viewModel.sendRawBytes([0x7F])
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+    }
+
+    private func stopRepeatingBackspace() {
+        backspaceRepeatTask?.cancel()
+        backspaceRepeatTask = nil
+    }
+
+    /// Ctrl+A then Ctrl+K — readline's standard "wipe the current line"
+    /// pair, and unlike Ctrl+U (kill only *before* the cursor) it clears the
+    /// whole line no matter where the cursor currently sits.
+    private func clearCurrentLine() {
+        viewModel.sendRawBytes([0x01, 0x0B])
     }
 
     private func toggleButton(_ label: String, modifier: TerminalModifier) -> some View {

@@ -38,7 +38,7 @@ struct WorkspaceBrowserTabView: View {
                                     Button("Restart Remote Session") {
                                         Task {
                                             try? await workspaceStore.terminate(workspace)
-                                            if let active = sessionStore.sessions.first(where: { $0.activeWorkspace?.id == workspace.id }) {
+                                            if let active = sessionStore.terminalSessions.first(where: { $0.activeWorkspace?.id == workspace.id }) {
                                                 sessionStore.close(active)
                                             }
                                             launch(workspace, host: host)
@@ -67,19 +67,8 @@ struct WorkspaceBrowserTabView: View {
 
                 Section("Browse a Host") {
                     ForEach(hosts) { host in
-                        NavigationLink {
-                            BrowserDestination(
-                                host: host,
-                                identity: identity(for: host),
-                                onLaunch: { path, tool in
-                                    let workspace = workspaceStore.session(host: host, path: path, tool: tool)
-                                    launch(workspace, host: host)
-                                },
-                                onLaunchPreset: { path, preset in
-                                    let workspace = workspaceStore.session(host: host, path: path, preset: preset)
-                                    launch(workspace, host: host)
-                                }
-                            )
+                        Button {
+                            browseFiles(host: host)
                         } label: {
                             Label {
                                 VStack(alignment: .leading) {
@@ -92,6 +81,7 @@ struct WorkspaceBrowserTabView: View {
                                 Image(systemName: "externaldrive.connected.to.line.below")
                             }
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -111,12 +101,6 @@ struct WorkspaceBrowserTabView: View {
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) { Button("OK") {} } message: { Text(errorMessage ?? "") }
-            .task {
-                while !Task.isCancelled {
-                    await workspaceStore.checkForCompletions()
-                    try? await Task.sleep(for: .seconds(30))
-                }
-            }
             .overlay {
                 if hosts.isEmpty {
                     ContentUnavailableView(
@@ -137,25 +121,20 @@ struct WorkspaceBrowserTabView: View {
         sessionStore.open(workspace: workspace, host: host, identity: identity(for: host))
         navigationStore.navigate(to: .sessions)
     }
-}
 
-private struct BrowserDestination: View {
-    let host: Host
-    let identity: Identity?
-    let onLaunch: (String, AgentTool) -> Void
-    let onLaunchPreset: (String, AgentPreset) -> Void
-    @EnvironmentObject private var sessionStore: SessionStore
-    @State private var session: TerminalViewModel?
-
-    var body: some View {
-        Group {
-            if let session {
-                SFTPGateView(host: host, connectionID: session.id, onLaunch: onLaunch, onLaunchPreset: onLaunchPreset)
-            } else {
-                ProgressView("Connecting…")
+    private func browseFiles(host: Host) {
+        let terminal = sessionStore.open(host: host, identity: identity(for: host))
+        navigationStore.navigate(to: .sessions)
+        Task {
+            for _ in 0..<50 {
+                if let sshClient = await SSHSessionManager.shared.session(for: terminal.id) {
+                    sessionStore.openSFTP(host: host, connectionID: terminal.id, sshClient: sshClient)
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
-        .task { session = sessionStore.open(host: host, identity: identity) }
     }
 }
 

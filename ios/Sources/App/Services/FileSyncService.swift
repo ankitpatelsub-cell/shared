@@ -97,15 +97,14 @@ final class FileSyncService: ObservableObject {
         save()
     }
 
-    func syncNow(_ record: FileSyncRecord) async {
+    func syncNow(_ record: FileSyncRecord, host: Host, identity: Identity?) async {
         await MainActor.run {
             isSyncing = true
             syncStatus = "Syncing \(record.localPath.components(separatedBy: "/").last ?? "files")..."
         }
 
         do {
-            // Simulate sync operation
-            try await Task.sleep(for: .seconds(2))
+            try await performSync(record, host: host, identity: identity)
 
             await MainActor.run {
                 updateLastSynced(record)
@@ -123,10 +122,14 @@ final class FileSyncService: ObservableObject {
         }
     }
 
-    func syncAll() async {
+    /// `hosts`/`identities` are passed in from the caller's SwiftData `@Query`
+    /// results — this service has no `ModelContext` of its own to fetch them.
+    func syncAll(hosts: [Host], identities: [Identity]) async {
         let records = syncRecords.filter { $0.autoSync }
         for record in records {
-            await syncNow(record)
+            guard let host = hosts.first(where: { $0.id == record.hostID }) else { continue }
+            let identity = identities.first { $0.id == host.identityID }
+            await syncNow(record, host: host, identity: identity)
         }
     }
 

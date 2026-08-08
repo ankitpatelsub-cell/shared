@@ -39,7 +39,7 @@ struct CommandPaletteView: View {
         items.append(CommandItem.action(action: .openKeys, title: "SSH Keys", icon: "key"))
 
         // Add new tab actions for each host with active sessions
-        for session in sessionStore.sessions {
+        for session in sessionStore.terminalSessions {
             if session.activeWorkspace == nil {
                 items.append(CommandItem.newTabForHost(session.host))
             }

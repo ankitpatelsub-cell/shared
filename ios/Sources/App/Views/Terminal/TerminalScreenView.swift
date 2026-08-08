@@ -177,7 +177,11 @@ struct TerminalScreenView: View {
         .task {
             applyFontSize()
             applyTerminalTheme()
-            if viewModel.status == .disconnected {
+            // `.failed` (e.g. auto-reconnect gave up after its 5 attempts
+            // while the app sat backgrounded) was previously excluded here,
+            // so reopening a long-stale session did nothing until the user
+            // found the manual "Reconnect" menu item.
+            if viewModel.status == .disconnected || viewModel.status.isFailure {
                 await viewModel.reconnect()
             }
         }
@@ -324,6 +328,8 @@ struct TerminalScreenView: View {
 
             topBarButton("folder") { showingSFTP = true }
                 .accessibilityLabel("Browse remote files")
+            agentModeMenu
+
             Menu {
                 sessionSwitcher
                 Divider()
@@ -430,6 +436,53 @@ struct TerminalScreenView: View {
         }
     }
 
+    /// One-tap access to the mode/approval switches Claude Code and Codex
+    /// expose inside their own REPL — otherwise reaching them means typing
+    /// the slash command or hunting for the Shift+Tab chord on a soft
+    /// keyboard. Only shown for sessions actually running one of those
+    /// tools; hidden for plain shell/Hermes sessions where it's meaningless.
+    @ViewBuilder
+    private var agentModeMenu: some View {
+        switch viewModel.activeWorkspace?.tool {
+        case .claude:
+            Menu {
+                Button {
+                    // Shift+Tab: Claude Code's own chord for cycling
+                    // default → auto-accept edits → plan mode.
+                    viewModel.sendRawBytes(Array("\u{1B}[Z".utf8))
+                } label: {
+                    Label("Cycle Permission Mode (Shift+Tab)", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button {
+                    viewModel.sendRawBytes(Array("/model".utf8))
+                } label: {
+                    Label("Switch Model (/model)", systemImage: "cpu")
+                }
+            } label: {
+                topBarIcon("sparkles")
+            }
+            .accessibilityLabel("Claude Mode")
+        case .codex:
+            Menu {
+                Button {
+                    viewModel.sendRawBytes(Array("/approvals".utf8))
+                } label: {
+                    Label("Change Approval Mode (/approvals)", systemImage: "checkmark.shield")
+                }
+                Button {
+                    viewModel.sendRawBytes(Array("/model".utf8))
+                } label: {
+                    Label("Switch Model (/model)", systemImage: "cpu")
+                }
+            } label: {
+                topBarIcon("chevron.left.forwardslash.chevron.right")
+            }
+            .accessibilityLabel("Codex Mode")
+        default:
+            EmptyView()
+        }
+    }
+
     private func topBarButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             topBarIcon(systemImage)
@@ -446,9 +499,9 @@ struct TerminalScreenView: View {
 
     @ViewBuilder
     private var sessionSwitcher: some View {
-        if sessionStore.sessions.count > 1 {
+        if sessionStore.terminalSessions.count > 1 {
             Menu("Switch Session") {
-                ForEach(sessionStore.sessions) { session in
+                ForEach(sessionStore.terminalSessions) { session in
                     Button {
                         sessionStore.activeSessionID = session.id
                     } label: {
@@ -593,7 +646,7 @@ struct TerminalScreenView: View {
     }
 }
 
-private extension View {
+extension View {
     /// Fires `onPress` the instant the finger goes down and `onRelease` when it
     /// lifts (or the touch is cancelled) — `DragGesture(minimumDistance: 0)` is
     /// the standard SwiftUI way to get press/release edges on a plain view

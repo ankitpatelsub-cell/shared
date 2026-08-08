@@ -62,7 +62,7 @@ struct SnippetLibraryView: View {
     }
 
     private func runOnConnectedHosts(_ snippet: Snippet) async {
-        let sessions = sessionStore.sessions.filter { $0.status == .connected }
+        let sessions = sessionStore.terminalSessions.filter { $0.status == .connected }
         guard !sessions.isEmpty else { resultMessage = "No connected hosts."; return }
         var successes = 0
         var failures: [String] = []

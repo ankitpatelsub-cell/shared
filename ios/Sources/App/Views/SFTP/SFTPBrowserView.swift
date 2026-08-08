@@ -26,6 +26,12 @@ struct SFTPBrowserView: View {
         self.onLaunchPreset = onLaunchPreset
     }
 
+    init(viewModel: SFTPBrowserViewModel, onLaunch: ((String, AgentTool) -> Void)? = nil, onLaunchPreset: ((String, AgentPreset) -> Void)? = nil) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+        self.onLaunch = onLaunch
+        self.onLaunchPreset = onLaunchPreset
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             breadcrumbBar
@@ -72,6 +78,7 @@ struct SFTPBrowserView: View {
                                 if isMultiSelectMode {
                                     toggleSelection(entry.id)
                                 } else {
+                                    if entry.isDirectory { searchText = "" }
                                     Task { await viewModel.open(entry) }
                                 }
                             },
