@@ -135,7 +135,15 @@ struct SessionsTabView: View {
                 .tag(Optional(session.id))
             }
         }
-        .tabViewStyle(.page(indexDisplayMode: sessionStore.sessions.count > 1 ? .never : .always))
+        // Always `.never`: `indexDisplayMode` used to flip between `.always`
+        // and `.never` based on session count, and toggling it exactly when
+        // a session is added/removed crashes UIKitPageIndexView (array
+        // index out-of-bounds inside its internal dot-count update — this
+        // is what produced the SIGTRAP opening SFTP browse, since that adds
+        // a new session while page count and index-mode changed together).
+        // The tab strip above already shows position/switching, so the
+        // page dots were redundant even at a single session.
+        .tabViewStyle(.page(indexDisplayMode: .never))
     }
 
     private func identity(for host: Host) -> Identity? {
