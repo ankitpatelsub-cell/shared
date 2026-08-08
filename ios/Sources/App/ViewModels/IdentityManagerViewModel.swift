@@ -33,6 +33,7 @@ final class IdentityManagerViewModel: ObservableObject {
             lastGeneratedPrivateKeyPEM = generated.privateKeyPEM
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .authentication, message: "Couldn't generate key \(label)", technicalDetails: error.localizedDescription)
         }
     }
 
@@ -60,6 +61,7 @@ final class IdentityManagerViewModel: ObservableObject {
             context.insert(identity)
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .authentication, message: "Couldn't import key \(label)", technicalDetails: error.localizedDescription)
         }
     }
 

@@ -64,6 +64,7 @@ final class ProjectDashboardViewModel: ObservableObject {
             githubRepository = Self.githubSlug(from: try await originResult)
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .general, message: "Couldn't refresh project dashboard for \(host.label)", technicalDetails: error.localizedDescription)
         }
     }
 
@@ -79,6 +80,7 @@ final class ProjectDashboardViewModel: ObservableObject {
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .general, message: "Command failed on \(host.label)", technicalDetails: error.localizedDescription)
         }
     }
 

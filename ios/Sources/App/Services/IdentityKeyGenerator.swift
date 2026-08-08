@@ -69,16 +69,16 @@ enum IdentityKeyGenerator {
 
         var error: Unmanaged<CFError>?
         guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error!.takeRetainedValue() as Error
+            throw (error?.takeRetainedValue()).map { $0 as Error } ?? SSHKeyFormatError.derParsingFailed
         }
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
             throw SSHKeyFormatError.derParsingFailed
         }
         guard let privateDER = SecKeyCopyExternalRepresentation(privateKey, &error) as Data? else {
-            throw error!.takeRetainedValue() as Error
+            throw (error?.takeRetainedValue()).map { $0 as Error } ?? SSHKeyFormatError.derParsingFailed
         }
         guard let publicDER = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw error!.takeRetainedValue() as Error
+            throw (error?.takeRetainedValue()).map { $0 as Error } ?? SSHKeyFormatError.derParsingFailed
         }
 
         let privatePEM = SSHKeyFormat.pem(label: "RSA PRIVATE KEY", derBytes: Array(privateDER))

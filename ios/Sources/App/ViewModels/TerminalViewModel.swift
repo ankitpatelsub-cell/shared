@@ -336,6 +336,12 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         } catch {
             guard !isClosing else { return }
             status = .failed(error.localizedDescription)
+            ErrorLogger.shared.log(
+                category: .network,
+                message: "Couldn't connect to \(host.label)",
+                technicalDetails: error.localizedDescription,
+                suggestion: ErrorLogger.suggestedAction(for: error)
+            )
         }
     }
 
@@ -485,6 +491,12 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         } catch {
             guard !isClosing else { return }
             status = .failed(error.localizedDescription)
+            ErrorLogger.shared.log(
+                category: .network,
+                message: "Couldn't attach to workspace on \(host.label)",
+                technicalDetails: error.localizedDescription,
+                suggestion: ErrorLogger.suggestedAction(for: error)
+            )
         }
     }
 
@@ -613,6 +625,11 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                     self.pendingInput.removeAll(keepingCapacity: true)
                     self.inputDrainTask = nil
                     self.status = .disconnected
+                    ErrorLogger.shared.log(
+                        category: .network,
+                        message: "Connection to \(self.host.label) dropped while sending input",
+                        technicalDetails: error.localizedDescription
+                    )
                     await SSHSessionManager.shared.disconnect(connectionID: self.id)
                     return
                 }

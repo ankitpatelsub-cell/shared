@@ -15,11 +15,13 @@ struct SFTPEntry: Identifiable, Hashable {
 enum SFTPError: Error, LocalizedError {
     case notConnected
     case transferCancelled
+    case couldNotOpenLocalFile(URL)
 
     var errorDescription: String? {
         switch self {
         case .notConnected: return "Not connected to this host's SFTP subsystem."
         case .transferCancelled: return "Transfer cancelled."
+        case .couldNotOpenLocalFile(let url): return "Couldn't open \(url.lastPathComponent) for writing on this device."
         }
     }
 }
@@ -95,7 +97,15 @@ actor SFTPService {
         let totalSize = Int64(buffer.readableBytes)
         var bytesRead: Int64 = 0
         
-        let outputStream = OutputStream(url: localURL, append: false)!
+        // `OutputStream(url:append:)` is a failable initializer — it can
+        // return nil under real, user-reachable conditions (parent
+        // directory missing, container read-only, storage pressure, a
+        // security-scoped URL whose access briefly lapsed), so force-
+        // unwrapping it crashed the whole app on a download instead of
+        // surfacing a normal "couldn't save file" error.
+        guard let outputStream = OutputStream(url: localURL, append: false) else {
+            throw SFTPError.couldNotOpenLocalFile(localURL)
+        }
         outputStream.open()
         defer { outputStream.close() }
         

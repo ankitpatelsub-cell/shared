@@ -119,6 +119,12 @@ final class FileSyncService: ObservableObject {
                 syncStatus = "Sync failed: \(error.localizedDescription)"
                 isSyncing = false
             }
+            ErrorLogger.shared.log(
+                category: .fileOperation,
+                message: "File sync failed for \(record.localPath)",
+                technicalDetails: error.localizedDescription,
+                suggestion: ErrorLogger.suggestedAction(for: error)
+            )
         }
     }
 

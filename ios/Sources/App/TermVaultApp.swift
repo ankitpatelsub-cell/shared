@@ -12,15 +12,44 @@ struct TermVaultApp: App {
     @StateObject private var agentPresetStore = AgentPresetStore()
     @Environment(\.scenePhase) private var scenePhase
 
-    private var sharedModelContainer: ModelContainer = {
+    private var sharedModelContainer: ModelContainer = Self.makeModelContainer()
+
+    // Was a bare `fatalError` on any init failure — reachable by ordinary
+    // user-side conditions (storage full at first launch, an on-disk store
+    // corrupted by a prior force-quit mid-write, or a schema incompatible
+    // with a prior app version after an update), turning any of those into
+    // a permanent launch-crash loop. Now attempts to recreate the store,
+    // and only gives up the saved data (falling back to in-memory) rather
+    // than terminating the process.
+    private static func makeModelContainer() -> ModelContainer {
         let schema = Schema([Host.self, Identity.self, Snippet.self, WorkspaceProject.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
-            fatalError("Failed to create SwiftData ModelContainer: \(error)")
+            ErrorLogger.shared.log(
+                category: .general,
+                message: "SwiftData store failed to load — attempting recovery",
+                technicalDetails: "\(error)"
+            )
+            if FileManager.default.fileExists(atPath: configuration.url.path) {
+                try? FileManager.default.removeItem(at: configuration.url)
+            }
+            if let recovered = try? ModelContainer(for: schema, configurations: [configuration]) {
+                return recovered
+            }
+            ErrorLogger.shared.log(
+                category: .general,
+                message: "Falling back to in-memory storage — saved hosts and identities could not be recovered",
+                technicalDetails: "\(error)"
+            )
+            let inMemoryConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            guard let fallback = try? ModelContainer(for: schema, configurations: [inMemoryConfiguration]) else {
+                fatalError("Failed to create even an in-memory ModelContainer: \(error)")
+            }
+            return fallback
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {

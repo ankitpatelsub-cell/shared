@@ -33,6 +33,13 @@ final class ErrorLogger {
 
     private let logger = OSLog(subsystem: "dev.termvault", category: "errors")
     private let fileManager = FileManager.default
+    // `ErrorLogger.shared` is called from every isolation domain in the
+    // app — @MainActor view models, the SSHSessionManager/SFTPService
+    // actors, background queues, and NotificationService.handleAction
+    // (which deliberately runs off the main actor). Plain `[LogEntry]`
+    // mutation from all of those concurrently is a data race; this lock
+    // makes every read/write of `logs` mutually exclusive.
+    private let lock = NSLock()
     private var logs: [LogEntry] = []
     private let logsDirectoryKey = "dev.termvault.logsDirectory"
 
@@ -54,27 +61,38 @@ final class ErrorLogger {
             suggestion: suggestion
         )
 
+        lock.lock()
         logs.append(entry)
+        let snapshot = logs
+        lock.unlock()
+
         os_log("[%{public}@] %{public}@", log: logger, type: .error, category.rawValue, message)
 
         if let details = technicalDetails {
             os_log("Details: %{public}@", log: logger, type: .debug, details)
         }
 
-        saveToDisk()
+        saveToDisk(snapshot)
     }
 
     func getRecentLogs(limit: Int = 50) -> [LogEntry] {
-        Array(logs.suffix(limit))
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(logs.suffix(limit))
     }
 
     func clearLogs() {
+        lock.lock()
         logs.removeAll()
-        saveToDisk()
+        lock.unlock()
+        saveToDisk([])
     }
 
     func exportLogsAsText() -> String {
-        logs.map { entry in
+        lock.lock()
+        let snapshot = logs
+        lock.unlock()
+        return snapshot.map { entry in
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
             let timestamp = dateFormatter.string(from: entry.timestamp)
@@ -90,10 +108,10 @@ final class ErrorLogger {
         }.joined(separator: "\n\n")
     }
 
-    private func saveToDisk() {
+    private func saveToDisk(_ snapshot: [LogEntry]) {
         DispatchQueue.global(qos: .background).async {
             do {
-                let data = try JSONEncoder().encode(self.logs)
+                let data = try JSONEncoder().encode(snapshot)
                 let logsDir = self.getLogsDirectory()
                 try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
                 let filePath = logsDir.appendingPathComponent("errors.json")
@@ -110,7 +128,10 @@ final class ErrorLogger {
                 let filePath = self.getLogsDirectory().appendingPathComponent("errors.json")
                 if FileManager.default.fileExists(atPath: filePath.path) {
                     let data = try Data(contentsOf: filePath)
-                    self.logs = try JSONDecoder().decode([LogEntry].self, from: data)
+                    let decoded = try JSONDecoder().decode([LogEntry].self, from: data)
+                    self.lock.lock()
+                    self.logs = decoded
+                    self.lock.unlock()
                 }
             } catch {
                 os_log("Failed to load logs: %{public}@", log: self.logger, type: .error, error.localizedDescription)

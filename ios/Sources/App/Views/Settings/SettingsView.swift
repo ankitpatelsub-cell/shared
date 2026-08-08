@@ -84,6 +84,14 @@ struct SettingsView: View {
                     NavigationLink("Session History") { SessionHistoryView() }
                 }
 
+                Section("Diagnostics") {
+                    NavigationLink {
+                        LogViewerView()
+                    } label: {
+                        Label("Error Log", systemImage: "exclamationmark.triangle")
+                    }
+                }
+
                 Section("Tools") {
                     NavigationLink("File Sync") { FileSyncManagerView() }
                 }

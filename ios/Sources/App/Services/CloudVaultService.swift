@@ -48,7 +48,17 @@ private struct VaultWriteResponse: Decodable { let revision: Int }
 @MainActor
 final class CloudVaultService {
     static let shared = CloudVaultService()
-    private let baseURL = URL(string: "https://masystem.co.in/termvault-api")!
+    // Force-unwrapped URL(string:) on a literal is a landmine: it compiles
+    // fine today but any future edit to this string (typo, stray space,
+    // pasted non-ASCII) turns into an instant crash on first Cloud Vault
+    // use with no compiler warning. guard+precondition at least names the
+    // literal in the crash log instead of an opaque "unexpectedly found nil".
+    private let baseURL: URL = {
+        guard let url = URL(string: "https://masystem.co.in/termvault-api") else {
+            preconditionFailure("Malformed CloudVaultService base URL literal")
+        }
+        return url
+    }()
 
     func authenticate(email: String, password: String, register: Bool) async throws {
         var request = URLRequest(url: baseURL.appending(path: register ? "v1/register" : "v1/login"))

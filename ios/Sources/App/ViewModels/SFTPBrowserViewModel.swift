@@ -88,6 +88,12 @@ final class SFTPBrowserViewModel: ObservableObject {
             entries = try await SFTPService.shared.listDirectory(hostID: connectionID, sshClient: sshClient, path: currentPath)
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(
+                category: .fileOperation,
+                message: "Couldn't list \(currentPath) on \(host.label)",
+                technicalDetails: error.localizedDescription,
+                suggestion: ErrorLogger.suggestedAction(for: error)
+            )
         }
     }
     
@@ -142,15 +148,21 @@ final class SFTPBrowserViewModel: ObservableObject {
                         self.transfers[idx].status = .failed
                         self.transfers[idx].error = error.localizedDescription
                     }
+                    ErrorLogger.shared.log(
+                        category: .fileOperation,
+                        message: "Download failed: \(transfer.entry.name)",
+                        technicalDetails: error.localizedDescription,
+                        suggestion: ErrorLogger.suggestedAction(for: error)
+                    )
                 }
             }
         }
-        
+
         activeTransfers[transfer.id] = task
         await task.value
         activeTransfers.removeValue(forKey: transfer.id)
     }
-    
+
     private func runUploadTransfer(_ transfer: TransferItem, localURL: URL, remotePath: String) async {
         guard let index = transfers.firstIndex(where: { $0.id == transfer.id }) else { return }
         
@@ -187,15 +199,21 @@ final class SFTPBrowserViewModel: ObservableObject {
                         self.transfers[idx].status = .failed
                         self.transfers[idx].error = error.localizedDescription
                     }
+                    ErrorLogger.shared.log(
+                        category: .fileOperation,
+                        message: "Upload failed: \(transfer.entry.name)",
+                        technicalDetails: error.localizedDescription,
+                        suggestion: ErrorLogger.suggestedAction(for: error)
+                    )
                 }
             }
         }
-        
+
         activeTransfers[transfer.id] = task
         await task.value
         activeTransfers.removeValue(forKey: transfer.id)
     }
-    
+
     private func updateSpeedAndETA(for transfer: TransferItem, progress: Double) {
         let elapsed = Date().timeIntervalSince(transfer.startTime)
         if elapsed > 0 && progress > 0 {
@@ -294,6 +312,7 @@ final class SFTPBrowserViewModel: ObservableObject {
             await load()
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .fileOperation, message: "Couldn't create folder \(path)", technicalDetails: error.localizedDescription)
         }
     }
 
@@ -304,6 +323,7 @@ final class SFTPBrowserViewModel: ObservableObject {
             await load()
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .fileOperation, message: "Couldn't rename \(entry.name)", technicalDetails: error.localizedDescription)
         }
     }
 
@@ -313,6 +333,7 @@ final class SFTPBrowserViewModel: ObservableObject {
             await load()
         } catch {
             errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .fileOperation, message: "Couldn't delete \(entry.name)", technicalDetails: error.localizedDescription)
         }
     }
 
@@ -336,6 +357,9 @@ final class SFTPBrowserViewModel: ObservableObject {
         do {
             _ = try await RemoteCommandService.shared.run(hostID: host.id, command: command)
             await load()
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            errorMessage = error.localizedDescription
+            ErrorLogger.shared.log(category: .fileOperation, message: "File command failed on \(host.label)", technicalDetails: error.localizedDescription)
+        }
     }
 }
