@@ -121,6 +121,19 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         private let maxReconnectAttempts = 5
         private var reconnectTask: Task<Void, Never>? = nil
         private var latencyHistory: [Int] = []
+        // Set by `disconnect()`; checked after every `await` in `connect()`/
+        // `attach()` so a connect that was already in flight when the user
+        // closed the tab can't resurrect `status` back to `.connected` (or
+        // send tmux commands into a session SessionStore no longer tracks)
+        // once it finally resumes.
+        private var isClosing = false
+        // `attach()` has no guard against running twice concurrently the
+        // way `connect()` does via its `status == .connecting` check —
+        // without this, two overlapping calls (e.g. the terminal view's
+        // `.task` firing again while an earlier attach is still awaiting)
+        // can both pass the `status == .connected` gate and each send their
+        // own `tmux new-session -A …`, duplicating input into the shell.
+        private var isAttaching = false
     
         // Per-host terminal settings
         @Published var terminalFontSize: Double = 14
@@ -270,6 +283,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
     func connect() async {
         guard status != .connecting, status != .connected else { return }
+        isClosing = false
         status = .connecting
         responseLatencyMilliseconds = nil
         do {
@@ -289,6 +303,14 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                     }
                 }
             )
+            guard !isClosing else {
+                // The tab was closed while this connect was still in
+                // flight — tear the just-established connection back down
+                // instead of leaving it orphaned and flipping status back
+                // to `.connected` behind SessionStore's back.
+                await SSHSessionManager.shared.disconnect(connectionID: id)
+                return
+            }
             status = .connected
             reconnectAttempt = 0
             autoReconnectStatus = nil
@@ -312,6 +334,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                 try? await send(command + "\n")
             }
         } catch {
+            guard !isClosing else { return }
             status = .failed(error.localizedDescription)
         }
     }
@@ -412,6 +435,10 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
 
     func attach(to workspace: WorkspaceSession) async {
         if attachedTmuxName == workspace.tmuxName, status == .connected { return }
+        guard !isAttaching else { return }
+        isAttaching = true
+        defer { isAttaching = false }
+
         activeWorkspace = workspace
         if status == .disconnected || status.isFailure {
             await connect()
@@ -421,7 +448,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
-        guard status == .connected else { return }
+        guard status == .connected, !isClosing else { return }
 
         if attachedTmuxName != nil {
             // Detach from the current remote tmux client before asking the
@@ -449,12 +476,14 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         let command = "if ! command -v tmux >/dev/null 2>&1; then printf '\\nTermVault: tmux is required for resumable sessions.\\n'; else \(tmuxCommand); fi\n"
         do {
             try await send(command)
+            guard !isClosing else { return }
             attachedTmuxName = workspace.tmuxName
             if let prompt = workspace.startupPrompt, !prompt.isEmpty {
                 try? await Task.sleep(for: .milliseconds(800))
                 try await send(prompt + "\n")
             }
         } catch {
+            guard !isClosing else { return }
             status = .failed(error.localizedDescription)
         }
     }
@@ -534,6 +563,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
     }
 
     func disconnect() {
+        isClosing = true
         inputDrainTask?.cancel()
         inputDrainTask = nil
         resizeTask?.cancel()

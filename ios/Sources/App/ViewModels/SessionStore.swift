@@ -74,6 +74,14 @@ final class SessionStore: ObservableObject {
     private var connectionHosts: [Host] = []
     private var connectionIdentities: [Identity] = []
     private let preferencesKey = "dev.termvault.sessionPreferences"
+    // Tracks the fire-and-forget connect/attach/load Task started by each
+    // open*() call, keyed by session id, so close() can cancel it. Without
+    // this, closing a tab while its connect() was still awaiting the SSH
+    // handshake left that Task running: it could flip `status` back to
+    // `.connected` after disconnect() already marked it `.disconnected`,
+    // send tmux commands into a session nothing references anymore, and
+    // keep the closed view model alive via its own captured `self`.
+    private var startupTasks: [UUID: Task<Void, Never>] = [:]
 
     private struct SessionPreference: Codable {
         var title: String?
@@ -110,7 +118,7 @@ final class SessionStore: ObservableObject {
         sessions.append(.terminal(viewModel))
         sortSessions()
         activeSessionID = viewModel.id
-        Task { await viewModel.connect() }
+        startupTasks[viewModel.id] = Task { await viewModel.connect() }
         return viewModel
     }
 
@@ -124,7 +132,7 @@ final class SessionStore: ObservableObject {
         sessions.append(.terminal(viewModel))
         sortSessions()
         activeSessionID = viewModel.id
-        Task { await viewModel.connect() }
+        startupTasks[viewModel.id] = Task { await viewModel.connect() }
         return viewModel
     }
 
@@ -146,7 +154,7 @@ final class SessionStore: ObservableObject {
         sessions.append(.terminal(viewModel))
         sortSessions()
         activeSessionID = viewModel.id
-        Task { await viewModel.attach(to: workspace) }
+        startupTasks[viewModel.id] = Task { await viewModel.attach(to: workspace) }
         return viewModel
     }
 
@@ -157,7 +165,7 @@ final class SessionStore: ObservableObject {
         sessions.append(.sftp(viewModel))
         sortSessions()
         activeSessionID = viewModel.id
-        Task { await viewModel.load() }
+        startupTasks[viewModel.id] = Task { await viewModel.load() }
         return viewModel
     }
 
@@ -166,6 +174,8 @@ final class SessionStore: ObservableObject {
     }
 
     func close(_ session: OpenSession) {
+        startupTasks[session.id]?.cancel()
+        startupTasks[session.id] = nil
         switch session {
         case .terminal(let vm):
             SessionHistoryStore.shared.record(vm)
