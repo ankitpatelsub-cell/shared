@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct TermVaultApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
     @StateObject private var lockService = BiometricLockService()
     @StateObject private var sessionStore = SessionStore()

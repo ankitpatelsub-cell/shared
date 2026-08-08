@@ -10,6 +10,7 @@ struct HostListView: View {
     @State private var editingHost: Host?
     @State private var isPresentingNewHost = false
     @State private var connectingHost: Host?
+    @State private var isPresentingDashboard = false
 
     var body: some View {
         NavigationStack {
@@ -23,10 +24,17 @@ struct HostListView: View {
             .searchable(text: $viewModel.searchText)
             .navigationTitle("Hosts")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { isPresentingDashboard = true } label: { Image(systemName: "chart.bar.doc.horizontal") }
+                        .accessibilityLabel("Connection Status")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { isPresentingNewHost = true } label: { Image(systemName: "plus.circle.fill") }
                         .font(.title3)
                 }
+            }
+            .sheet(isPresented: $isPresentingDashboard) {
+                HostStatusDashboardView()
             }
             .sheet(isPresented: $isPresentingNewHost) {
                 HostEditorView(host: nil)

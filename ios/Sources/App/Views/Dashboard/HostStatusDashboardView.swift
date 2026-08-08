@@ -1,11 +1,18 @@
 import SwiftUI
 import SwiftData
 
+/// A live, cross-host view of every open session — previously this view
+/// existed but was wired to nothing (no tab, no menu item routed to it) and
+/// its row tap went to `NavigationLink(destination: EmptyView())`, so it was
+/// dead code. Now reachable from the Hosts tab toolbar, it shows every open
+/// terminal/SFTP session per host (not just one), and tapping a session
+/// switches straight to it.
 struct HostStatusDashboardView: View {
     @Query(sort: \Host.label) private var hosts: [Host]
     @EnvironmentObject private var sessionStore: SessionStore
+    @EnvironmentObject private var navigationStore: AppNavigationStore
     @ObservedObject private var historyStore = SessionHistoryStore.shared
-    @State private var selectedHost: Host?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -18,81 +25,106 @@ struct HostStatusDashboardView: View {
                 .navigationTitle("Connection Status")
             } else {
                 List(hosts) { host in
-                    let activeSession = sessionStore.terminalSessions.first { $0.host.id == host.id }
-                    let lastSession = historyStore.records.first { $0.hostID == host.id }
-
-                    NavigationLink(destination: EmptyView()) {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .center, spacing: 4) {
-                                Circle()
-                                    .fill(statusColor(for: activeSession))
-                                    .frame(width: 12, height: 12)
-                                    .shadow(color: statusColor(for: activeSession).opacity(0.6), radius: 3)
-
-                                Text(activeSession != nil ? "Live" : "Idle")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(width: 30)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(host.label)
-                                    .fontWeight(.semibold)
-
-                                HStack(spacing: 8) {
-                                    Text(host.address)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-
-                                    if let session = activeSession {
-                                        Label(
-                                            String(format: "%.0fms", session.responseLatencyMilliseconds.map(Double.init) ?? 0),
-                                            systemImage: "network"
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(.green)
-                                    }
+                    Section {
+                        let openSessions = sessionStore.sessions.filter { $0.host.id == host.id }
+                        if openSessions.isEmpty {
+                            idleRow(for: host)
+                        } else {
+                            ForEach(openSessions) { session in
+                                Button { open(session) } label: {
+                                    sessionRow(session)
                                 }
-
-                                if let lastSession = lastSession {
-                                    Text("Last: \(lastSession.endedAt, style: .relative)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 4) {
-                                if let session = activeSession {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
-                                } else {
-                                    Image(systemName: "xmark.circle")
-                                        .foregroundStyle(.gray)
-                                }
-
-                                Text(activeSession == nil ? "Offline" : "Online")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                .buttonStyle(.plain)
                             }
                         }
-                        .contentShape(Rectangle())
+                    } header: {
+                        Text(host.label)
+                    } footer: {
+                        if let lastSession = historyStore.records.first(where: { $0.hostID == host.id }) {
+                            Text("Last closed: \(lastSession.endedAt, format: .relative(presentation: .named))")
+                        }
                     }
                 }
                 .navigationTitle("Connection Status")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
             }
         }
     }
 
-    private func statusColor(for session: TerminalViewModel?) -> Color {
-        guard let session = session else { return .gray }
-        switch session.status {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .disconnected: return .gray
-        case .failed: return .red
+    private func idleRow(for host: Host) -> some View {
+        HStack(spacing: 12) {
+            Circle().fill(Color.gray).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(host.address)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("No open sessions")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
         }
+    }
+
+    @ViewBuilder
+    private func sessionRow(_ session: OpenSession) -> some View {
+        HStack(spacing: 12) {
+            statusDot(for: session)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayTitle)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    if let terminal = session.terminal {
+                        Text(statusLabel(terminal.status))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let tool = terminal.activeWorkspace?.tool {
+                            Text("· \(tool.title)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("SFTP")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func statusDot(for session: OpenSession) -> some View {
+        Circle()
+            .fill(session.terminal.map { Theme.Status.color(for: $0.status) } ?? .blue)
+            .frame(width: 8, height: 8)
+    }
+
+    private func statusLabel(_ status: ConnectionStatus) -> String {
+        switch status {
+        case .connected: return "Connected"
+        case .connecting: return "Connecting…"
+        case .disconnected: return "Disconnected"
+        case .failed: return "Failed"
+        }
+    }
+
+    private func open(_ session: OpenSession) {
+        sessionStore.activeSessionID = session.id
+        navigationStore.navigate(to: .sessions)
+        dismiss()
     }
 }
 

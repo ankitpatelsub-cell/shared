@@ -30,6 +30,24 @@ struct SessionsTabView: View {
             // Remove the otherwise redundant 44-point navigation heading to
             // leave another terminal row visible above the keyboard.
             .toolbar(sessionStore.sessions.isEmpty ? .visible : .hidden, for: .navigationBar)
+            .background(keyboardShortcuts)
+        }
+    }
+
+    /// External-keyboard session switching (Cmd+1…9) and closing (Cmd+W) —
+    /// invisible buttons are the standard SwiftUI way to attach a global
+    /// `.keyboardShortcut` that isn't tied to a visible control. Cmd+K for
+    /// the command palette already exists on the terminal view itself;
+    /// these mirror that same "hardware keyboard on iPad" affordance.
+    @ViewBuilder
+    private var keyboardShortcuts: some View {
+        ForEach(Array(sessionStore.sessions.prefix(9).enumerated()), id: \.element.id) { index, session in
+            Button("") { sessionStore.activeSessionID = session.id }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+        }
+        if let active = sessionStore.activeSession {
+            Button("") { sessionStore.close(active) }
+                .keyboardShortcut("w", modifiers: .command)
         }
     }
 
