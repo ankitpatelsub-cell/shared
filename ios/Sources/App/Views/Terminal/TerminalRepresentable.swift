@@ -24,7 +24,13 @@ struct TerminalRepresentable: UIViewRepresentable {
         view.alwaysBounceHorizontal = false
         view.showsVerticalScrollIndicator = true
         view.isDirectionalLockEnabled = true
-        view.keyboardDismissMode = .interactive
+        // `.interactive` treats every scroll drag as also dragging the
+        // keyboard away — fine for a chat view, actively hostile here: the
+        // normal terminal workflow is scroll up to check earlier output
+        // *while staying in the middle of typing a command*. `.none` keeps
+        // the keyboard exactly where it is regardless of how much
+        // scrollback gets reviewed.
+        view.keyboardDismissMode = .none
         view.panGestureRecognizer.minimumNumberOfTouches = 1
     }
 }

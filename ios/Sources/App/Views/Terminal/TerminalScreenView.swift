@@ -78,6 +78,9 @@ struct TerminalScreenView: View {
                     .padding(.trailing, 4)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                zoomResetControl
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
@@ -101,6 +104,31 @@ struct TerminalScreenView: View {
             if let status = viewModel.autoReconnectStatus {
                 autoReconnectOverlay
             }
+        }
+    }
+
+    /// Shows the current font size after a pinch, and resets it back to
+    /// default on tap — the only way back before this was manually dragging
+    /// the font-size slider in Terminal Settings. Deliberately a plain
+    /// Button (not a gesture on the terminal itself, e.g. double-tap):
+    /// attaching another `.gesture()` directly to TerminalRepresentable
+    /// risks exactly the pan-gesture conflict that broke normal scrolling —
+    /// see the comment above TerminalRepresentable's usage.
+    @ViewBuilder
+    private var zoomResetControl: some View {
+        if abs(fontSize - 14) > 0.5 {
+            Button {
+                withAnimation { fontSize = 14 }
+            } label: {
+                Text("\(Int(fontSize))pt")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding(8)
+            .transition(.opacity)
+            .accessibilityLabel("Reset font size to default")
         }
     }
 
