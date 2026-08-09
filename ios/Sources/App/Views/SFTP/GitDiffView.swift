@@ -15,6 +15,14 @@ struct GitDiffView: View {
     @State private var errorMessage: String?
     @State private var includeStaged = true
     @State private var expandedFileIDs: Set<UUID> = []
+    @State private var commitMessage = ""
+    @State private var isCommitting = false
+    @State private var discardTarget: GitDiffFile?
+    @State private var isDiscarding = false
+    // Separate from `errorMessage` (which replaces the whole screen with
+    // ContentUnavailableView) — a failed commit/discard shouldn't blow away
+    // the diff the user is looking at, just surface an alert over it.
+    @State private var actionError: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -59,7 +67,33 @@ struct GitDiffView: View {
                                     fileHeader(file)
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        discardTarget = file
+                                    } label: {
+                                        Label("Discard Changes", systemImage: "arrow.uturn.backward")
+                                    }
+                                }
                             }
+                        }
+
+                        Section {
+                            TextField("Commit message", text: $commitMessage, axis: .vertical)
+                                .lineLimit(2...5)
+                            Button {
+                                Task { await commitAll() }
+                            } label: {
+                                if isCommitting {
+                                    HStack { ProgressView(); Text("Committing…") }
+                                } else {
+                                    Text("Commit All Changes")
+                                }
+                            }
+                            .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCommitting)
+                        } header: {
+                            Text("Commit")
+                        } footer: {
+                            Text("Stages and commits every file shown above with this message.")
                         }
                     }
                     .listStyle(.plain)
@@ -86,6 +120,69 @@ struct GitDiffView: View {
             }
             .onChange(of: includeStaged) { _, _ in Task { await load() } }
             .task { await load() }
+            .confirmationDialog(
+                "Discard changes to \(discardTarget?.displayPath ?? "")?",
+                isPresented: Binding(get: { discardTarget != nil }, set: { if !$0 { discardTarget = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Discard Changes", role: .destructive) {
+                    if let file = discardTarget { Task { await discard(file) } }
+                }
+                Button("Cancel", role: .cancel) { discardTarget = nil }
+            } message: {
+                Text("This can't be undone.")
+            }
+            .alert("Action Failed", isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )) { Button("OK") {} } message: { Text(actionError ?? "") }
+            .disabled(isDiscarding)
+        }
+    }
+
+    private func commitAll() async {
+        let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty, !files.isEmpty else { return }
+        isCommitting = true
+        defer { isCommitting = false }
+
+        // Stage only the files actually shown in this diff, not `-A` —
+        // committing everything in the working tree would silently include
+        // any pre-existing staged changes the "unstaged only" toggle was
+        // deliberately hiding. Renamed files need both the old and new
+        // path staged so git records the rename instead of a delete+add.
+        let paths = files.flatMap { file -> [String] in
+            file.isRenamed ? [file.oldPath, file.newPath] : [file.displayPath]
+        }.map(ProjectDashboardViewModel.quote).joined(separator: " ")
+
+        let command = "cd -- \(ProjectDashboardViewModel.quote(path)) && git add -- \(paths) && git commit -m \(ProjectDashboardViewModel.quote(message)) 2>&1"
+        do {
+            _ = try await RemoteCommandService.shared.run(hostID: host.id, command: command, maxResponseSize: 1_048_576)
+            commitMessage = ""
+            await load()
+        } catch {
+            actionError = error.localizedDescription
+            ErrorLogger.shared.log(category: .general, message: "Commit failed for \(path)", technicalDetails: error.localizedDescription)
+        }
+    }
+
+    private func discard(_ file: GitDiffFile) async {
+        discardTarget = nil
+        isDiscarding = true
+        defer { isDiscarding = false }
+
+        // Untracked (new) files aren't restored by `git checkout` — remove
+        // them directly. Everything else gets restored to HEAD.
+        let target = ProjectDashboardViewModel.quote(file.displayPath)
+        let command = file.isNew
+            ? "cd -- \(ProjectDashboardViewModel.quote(path)) && rm -f -- \(target) 2>&1"
+            : "cd -- \(ProjectDashboardViewModel.quote(path)) && git checkout -- \(target) 2>&1"
+        do {
+            _ = try await RemoteCommandService.shared.run(hostID: host.id, command: command, maxResponseSize: 1_048_576)
+            await load()
+        } catch {
+            actionError = error.localizedDescription
+            ErrorLogger.shared.log(category: .general, message: "Discard failed for \(file.displayPath)", technicalDetails: error.localizedDescription)
         }
     }
 
