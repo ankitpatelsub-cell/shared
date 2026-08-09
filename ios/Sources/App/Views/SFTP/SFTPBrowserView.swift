@@ -415,7 +415,7 @@ private struct SFTPEntryRow: View {
                 .foregroundStyle(entry.isDirectory ? .blue : .secondary)
             VStack(alignment: .leading) {
                 Text(entry.name)
-                Text("\(entry.permissions) · \(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -431,6 +431,14 @@ private struct SFTPEntryRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
+    }
+
+    // modifiedAt was already fetched from the SFTP server and used to
+    // implement "sort by date" — just never actually shown on the row.
+    private var subtitle: String {
+        let permissionsAndSize = "\(entry.permissions) · \(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))"
+        guard let modifiedAt = entry.modifiedAt else { return permissionsAndSize }
+        return "\(permissionsAndSize) · \(modifiedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 }
 
