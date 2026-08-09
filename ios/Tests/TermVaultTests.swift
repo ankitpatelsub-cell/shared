@@ -11,6 +11,11 @@ final class TermVaultTests: XCTestCase {
         XCTAssertEqual(navigation.selectedTab, .browser)
     }
 
+    // These two were never actually compiled before (CI never ran the test
+    // target), so this @MainActor requirement — needed because
+    // TerminalViewModel itself is @MainActor-isolated — went unnoticed
+    // until the "Run unit tests" step landed.
+    @MainActor
     func testAttachmentNameRemovesUnsafePathCharacters() {
         XCTAssertEqual(
             TerminalViewModel.safeAttachmentName("../../screen shot?.png"),
@@ -18,6 +23,7 @@ final class TermVaultTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testAttachmentNamePreservesSafeCharacters() {
         XCTAssertEqual(
             TerminalViewModel.safeAttachmentName("error-log_2026.txt"),
