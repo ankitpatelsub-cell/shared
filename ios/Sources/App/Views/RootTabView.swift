@@ -10,6 +10,13 @@ struct RootTabView: View {
     @Query private var hosts: [Host]
     @Query private var identities: [Identity]
     @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
+    @State private var diffTarget: DiffTarget?
+
+    private struct DiffTarget: Identifiable {
+        let id: UUID
+        let host: Host
+        let path: String
+    }
 
     var body: some View {
         TabView(selection: Binding(
@@ -72,6 +79,16 @@ struct RootTabView: View {
             } else {
                 navigationStore.navigate(to: .browser)
             }
+        }
+        .onChange(of: notificationRouter.pendingDiffWorkspaceID) { _, workspaceID in
+            guard let workspaceID else { return }
+            defer { notificationRouter.pendingDiffWorkspaceID = nil }
+            guard let workspace = workspaceStore.recentSessions.first(where: { $0.id == workspaceID }),
+                  let host = hosts.first(where: { $0.id == workspace.hostID }) else { return }
+            diffTarget = DiffTarget(id: workspace.id, host: host, path: workspace.path)
+        }
+        .sheet(item: $diffTarget) { target in
+            GitDiffView(host: target.host, path: target.path)
         }
     }
 }

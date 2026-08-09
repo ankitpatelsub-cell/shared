@@ -10,6 +10,12 @@ struct SessionsTabView: View {
     @Query private var identities: [Identity]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var splitSessionID: UUID?
+    // Workspaces (by id) with uncommitted changes, per `git status
+    // --porcelain` — refreshed by `refreshDirtyStatus()` below. Scoped to
+    // this view (rather than living in WorkspaceStore's broader poll loop)
+    // since it only needs to cover the bounded set of currently-open tab
+    // chips, not every recent workspace.
+    @State private var dirtyWorkspaceIDs: Set<UUID> = []
 
     var body: some View {
         NavigationStack {
@@ -32,6 +38,28 @@ struct SessionsTabView: View {
             // leave another terminal row visible above the keyboard.
             .toolbar(sessionStore.sessions.isEmpty ? .visible : .hidden, for: .navigationBar)
             .background(keyboardShortcuts)
+            .task {
+                while !Task.isCancelled {
+                    await refreshDirtyStatus()
+                    try? await Task.sleep(for: .seconds(45))
+                }
+            }
+        }
+    }
+
+    private func refreshDirtyStatus() async {
+        for terminal in sessionStore.terminalSessions {
+            guard let workspace = terminal.activeWorkspace else { continue }
+            let path = ProjectDashboardViewModel.quote(workspace.path)
+            guard let output = try? await RemoteCommandService.shared.run(
+                hostID: workspace.hostID,
+                command: "cd -- \(path) 2>/dev/null && git status --porcelain 2>/dev/null | head -n 1 || true"
+            ) else { continue }
+            if output.isEmpty {
+                dirtyWorkspaceIDs.remove(workspace.id)
+            } else {
+                dirtyWorkspaceIDs.insert(workspace.id)
+            }
         }
     }
 
@@ -63,7 +91,8 @@ struct SessionsTabView: View {
                     ForEach(sessionStore.sessions) { session in
                         SessionTabChip(
                             session: session,
-                            isActive: session.id == sessionStore.activeSessionID
+                            isActive: session.id == sessionStore.activeSessionID,
+                            hasChanges: dirtyWorkspaceIDs.contains(session.terminal?.activeWorkspace?.id ?? UUID())
                         ) {
                             withAnimation(.easeOut(duration: 0.15)) {
                                 sessionStore.activeSessionID = session.id
@@ -192,6 +221,7 @@ struct SessionsTabView: View {
 private struct SessionTabChip: View {
     let session: OpenSession
     let isActive: Bool
+    let hasChanges: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
@@ -203,6 +233,12 @@ private struct SessionTabChip: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.6))
+                if hasChanges {
+                    Image(systemName: "plus.forwardslash.minus")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("Uncommitted changes")
+                }
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))

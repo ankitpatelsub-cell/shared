@@ -9,6 +9,7 @@ struct TerminalScreenView: View {
     @ObservedObject var viewModel: TerminalViewModel
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var navigationStore: AppNavigationStore
+    @EnvironmentObject private var workspaceStore: WorkspaceStore
     @Environment(\.dismiss) private var dismiss
     @State private var showingTranscript = false
     @State private var showingCloseConfirmation = false
@@ -68,7 +69,10 @@ struct TerminalScreenView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ExtraKeysAccessoryView(viewModel: viewModel)
+            VStack(spacing: 0) {
+                waitingForInputBanner
+                ExtraKeysAccessoryView(viewModel: viewModel)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if viewModel.isViewingHistory {
@@ -207,6 +211,52 @@ struct TerminalScreenView: View {
         .cornerRadius(8)
         .padding(12)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// Surfaces the same idle-detection state that drives the "waiting"
+    /// push notification (`WorkspaceStore.waitingWorkspaceIDs`) directly in
+    /// the terminal, with one-tap replies — a notification is easy to miss
+    /// if the app is already open, and typing "yes" or hitting Enter on a
+    /// mobile keyboard for a prompt you can already see is needless friction.
+    @ViewBuilder
+    private var waitingForInputBanner: some View {
+        if let workspace = viewModel.activeWorkspace, workspaceStore.waitingWorkspaceIDs.contains(workspace.id) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("\(workspace.tool.title) is waiting for input", systemImage: "hand.raised.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                HStack(spacing: 8) {
+                    quickReplyChip("Enter") { reply(workspace, bytes: [0x0D]) }
+                    quickReplyChip("Yes") { reply(workspace, bytes: Array("yes\n".utf8)) }
+                    quickReplyChip("No") { reply(workspace, bytes: Array("no\n".utf8)) }
+                    quickReplyChip("Esc") { reply(workspace, bytes: [0x1B]) }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12))
+            .overlay(alignment: .top) {
+                Rectangle().fill(.orange.opacity(0.25)).frame(height: 0.5)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func quickReplyChip(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.orange.opacity(0.18)))
+                .foregroundStyle(.orange)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func reply(_ workspace: WorkspaceSession, bytes: [UInt8]) {
+        viewModel.sendRawBytes(bytes)
+        workspaceStore.clearWaiting(for: workspace.id)
     }
 
     var body: some View {

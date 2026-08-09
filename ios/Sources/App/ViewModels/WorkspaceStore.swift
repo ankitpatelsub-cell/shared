@@ -8,7 +8,12 @@ final class WorkspaceStore: ObservableObject {
     private var notifiedFinishedSessions: Set<UUID> = []
     private var observedRunningSessions: Set<UUID> = []
     private var lastPaneSnapshot: [UUID: String] = [:]
-    private var notifiedWaitingSessions: Set<UUID> = []
+    // Was a private `notifiedWaitingSessions` Set that only gated firing
+    // the push notification once per idle period. Published now so the UI
+    // can react directly too — an inline "waiting for input" banner in the
+    // terminal, not just a notification that's easy to miss if the app is
+    // already open.
+    @Published private(set) var waitingWorkspaceIDs: Set<UUID> = []
 
     init() {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
@@ -53,8 +58,15 @@ final class WorkspaceStore: ObservableObject {
     func remove(_ session: WorkspaceSession) {
         recentSessions.removeAll { $0.id == session.id }
         lastPaneSnapshot[session.id] = nil
-        notifiedWaitingSessions.remove(session.id)
+        waitingWorkspaceIDs.remove(session.id)
         save()
+    }
+
+    /// Optimistically clears the waiting flag the instant the user replies
+    /// via a quick-reply chip, rather than leaving the banner up for
+    /// however long is left until the next 30s poll confirms new output.
+    func clearWaiting(for workspaceID: UUID) {
+        waitingWorkspaceIDs.remove(workspaceID)
     }
 
     func rename(_ session: WorkspaceSession, to name: String) {
@@ -111,7 +123,7 @@ final class WorkspaceStore: ObservableObject {
             } else if observedRunningSessions.contains(workspace.id) {
                 notifiedFinishedSessions.insert(workspace.id)
                 lastPaneSnapshot[workspace.id] = nil
-                notifiedWaitingSessions.remove(workspace.id)
+                waitingWorkspaceIDs.remove(workspace.id)
                 await NotificationService.agentFinished(workspace)
             }
         }
@@ -130,12 +142,12 @@ final class WorkspaceStore: ObservableObject {
         ) else { return }
 
         if lastPaneSnapshot[workspace.id] == pane {
-            guard !notifiedWaitingSessions.contains(workspace.id) else { return }
-            notifiedWaitingSessions.insert(workspace.id)
+            guard !waitingWorkspaceIDs.contains(workspace.id) else { return }
+            waitingWorkspaceIDs.insert(workspace.id)
             await NotificationService.agentWaiting(workspace)
         } else {
             lastPaneSnapshot[workspace.id] = pane
-            notifiedWaitingSessions.remove(workspace.id)
+            waitingWorkspaceIDs.remove(workspace.id)
         }
     }
 

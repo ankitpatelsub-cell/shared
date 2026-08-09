@@ -39,7 +39,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             // button) — route to that workspace's session if it's open.
             if let idString = userInfo[NotificationService.workspaceIDKey] as? String,
                let id = UUID(uuidString: idString) {
-                Task { @MainActor in NotificationRouter.shared.pendingWorkspaceID = id }
+                let isFinished = response.notification.request.content.categoryIdentifier == NotificationService.finishedCategoryID
+                Task { @MainActor in
+                    NotificationRouter.shared.pendingWorkspaceID = id
+                    if isFinished { NotificationRouter.shared.pendingDiffWorkspaceID = id }
+                }
             }
         case NotificationService.continueActionID, NotificationService.cancelActionID:
             Task { await NotificationService.handleAction(response.actionIdentifier, userInfo: userInfo) }
