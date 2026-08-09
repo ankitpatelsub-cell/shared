@@ -91,6 +91,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.termvault.tests
         SWIFT_VERSION: "5.9"
+        # Nothing ever actually ran this target as a test bundle before
+        # (CI only built the app, never `xcodebuild test`), so the missing
+        # Info.plist never surfaced — code signing a test bundle for the
+        # simulator requires one, generated or explicit.
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   TermVault:
