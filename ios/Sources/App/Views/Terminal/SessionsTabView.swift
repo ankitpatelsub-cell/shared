@@ -1,8 +1,9 @@
 import SwiftUI
 import SwiftData
 
-/// Swipe left/right between open sessions (spec 3.3) via a paged TabView —
-/// on iPad this reads as the tab strip; on iPhone it's the swipe gesture.
+/// Switch between open sessions via the tab strip (2+ sessions), the
+/// "Switch Session" menu, or Cmd+1…9 on an external keyboard. No swipe
+/// gesture or paged TabView — see `sessionPager` for why.
 struct SessionsTabView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var workspaceStore: WorkspaceStore
@@ -135,8 +136,23 @@ struct SessionsTabView: View {
         }
     }
 
+    // `.tabViewStyle(.page(...))` was tried here with `indexDisplayMode`
+    // pinned to `.never` after it first crashed opening SFTP browse
+    // (UIKitPageIndexView hit an out-of-bounds array read when the session
+    // count changed mid-update). That crash recurred with the identical
+    // signature regardless — on this iOS build, SwiftUI's `.page` style
+    // apparently still drives the same page-index bookkeeping internally
+    // even when the dots aren't drawn, so it's still exposed to a
+    // dynamically changing `ForEach`. Switching to a plain `ZStack` that
+    // shows/hides each session removes `UIKitPageIndexView` (and this
+    // whole crash class) from the picture entirely, instead of continuing
+    // to tune a parameter of the thing that keeps crashing. Sessions stay
+    // mounted (so a backgrounded terminal keeps receiving output) exactly
+    // as the TabView pager did; only the swipe-to-switch gesture is gone,
+    // since the tab strip above and the "Switch Session" menu already
+    // cover switching without it.
     private var sessionPager: some View {
-        TabView(selection: $sessionStore.activeSessionID) {
+        ZStack {
             ForEach(sessionStore.sessions) { session in
                 Group {
                     switch session {
@@ -150,18 +166,11 @@ struct SessionsTabView: View {
                         )
                     }
                 }
-                .tag(Optional(session.id))
+                .opacity(session.id == sessionStore.activeSessionID ? 1 : 0)
+                .allowsHitTesting(session.id == sessionStore.activeSessionID)
+                .accessibilityHidden(session.id != sessionStore.activeSessionID)
             }
         }
-        // Always `.never`: `indexDisplayMode` used to flip between `.always`
-        // and `.never` based on session count, and toggling it exactly when
-        // a session is added/removed crashes UIKitPageIndexView (array
-        // index out-of-bounds inside its internal dot-count update — this
-        // is what produced the SIGTRAP opening SFTP browse, since that adds
-        // a new session while page count and index-mode changed together).
-        // The tab strip above already shows position/switching, so the
-        // page dots were redundant even at a single session.
-        .tabViewStyle(.page(indexDisplayMode: .never))
     }
 
     private func identity(for host: Host) -> Identity? {
