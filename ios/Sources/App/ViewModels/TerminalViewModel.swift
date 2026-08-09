@@ -637,13 +637,40 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
         }
     }
 
-    /// Network reads can arrive as many tiny SSH packets. Feed SwiftTerm once
-    /// per main-actor turn so output-heavy commands do less layout work and
-    /// keyboard handling remains responsive.
+    /// Network reads can arrive as many tiny SSH packets — feed SwiftTerm
+    /// (and update all the @Published state below) once per main-actor
+    /// turn rather than once per packet, so output-heavy commands do less
+    /// redundant work and keyboard handling remains responsive.
+    //
+    // Used to fire every @Published mutation below (transcript,
+    // sessionDataTransferred, responseLatencyMilliseconds, ...) directly
+    // from here, once per raw network read — which for interactive SSH
+    // (server echoes each keystroke back individually) meant once per
+    // keystroke. Every one of those triggered a full SwiftUI re-evaluation
+    // of TerminalScreenView's body, competing with the actual terminal
+    // rendering (handled separately by SwiftTerm's own UIKit view) and
+    // making fast typing feel laggy. `pendingOutput`/`outputFlushTask`
+    // already coalesced the *rendering* side via a `Task.yield()`; now all
+    // the @Published state changes ride the same coalesced flush instead
+    // of firing eagerly per read.
     private func receiveRemoteOutput(_ data: Data) {
         guard !data.isEmpty else { return }
+        pendingOutput.append(contentsOf: data)
+        guard outputFlushTask == nil else { return }
+        outputFlushTask = Task { [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            let bytes = self.pendingOutput
+            self.pendingOutput.removeAll(keepingCapacity: true)
+            self.outputFlushTask = nil
+            guard !bytes.isEmpty else { return }
+            self.applyOutput(bytes)
+        }
+    }
 
-        sessionDataTransferred += Int64(data.count)
+    private func applyOutput(_ bytes: [UInt8]) {
+        let data = Data(bytes)
+        sessionDataTransferred += Int64(bytes.count)
 
         // Parse OSC 52 clipboard from remote
         if let clipboardText = OSCSequence.parseClipboard(from: data) {
@@ -672,17 +699,7 @@ final class TerminalViewModel: NSObject, ObservableObject, Identifiable {
             responseStartedAt = nil
         }
 
-        pendingOutput.append(contentsOf: data)
-        guard outputFlushTask == nil else { return }
-        outputFlushTask = Task { [weak self] in
-            await Task.yield()
-            guard let self else { return }
-            let bytes = self.pendingOutput
-            self.pendingOutput.removeAll(keepingCapacity: true)
-            self.outputFlushTask = nil
-            guard !bytes.isEmpty else { return }
-            self.terminalView.feed(byteArray: bytes[...])
-        }
+        terminalView.feed(byteArray: bytes[...])
     }
 
     func clearTranscript() {
