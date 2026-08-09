@@ -6,7 +6,6 @@ struct TerminalSettingsView: View {
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
     @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
     @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
-    @AppStorage("dev.termvault.settings.gesturesEnabled") private var gesturesEnabled = true
     @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
     @State private var autoApproveSettings = AutoApproveSettings.shared
 
@@ -67,73 +66,6 @@ struct TerminalSettingsView: View {
                         Text("Compact").tag("compact")
                         Text("Standard").tag("standard")
                         Text("Full").tag("full")
-                    }
-                }
-
-                Section("Gestures") {
-                    Toggle("Enable Gestures", isOn: $gesturesEnabled)
-
-                    if gesturesEnabled {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "arrow.right")
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Swipe Right")
-                                        .font(.subheadline)
-                                    Text("Send Ctrl+C")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Divider()
-
-                            HStack {
-                                Image(systemName: "arrow.left")
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Swipe Left")
-                                        .font(.subheadline)
-                                    Text("Send Ctrl+D")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Divider()
-
-                            HStack {
-                                Image(systemName: "arrow.down")
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Swipe Down")
-                                        .font(.subheadline)
-                                    Text("Jump to Latest Output")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Divider()
-
-                            HStack {
-                                Image(systemName: "arrow.up")
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Swipe Up")
-                                        .font(.subheadline)
-                                    Text("Scroll to Top")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
                     }
                 }
 

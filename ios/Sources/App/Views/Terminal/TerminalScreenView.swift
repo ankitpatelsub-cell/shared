@@ -33,7 +33,6 @@ struct TerminalScreenView: View {
     @State private var showingTerminalSettings = false
     @State private var showingDiff = false
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
-    @AppStorage("dev.termvault.settings.gesturesEnabled") private var gesturesEnabled = true
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
 
@@ -42,6 +41,19 @@ struct TerminalScreenView: View {
         VStack(spacing: 0) {
             topBar
             ZStack(alignment: .trailing) {
+                // Used to attach a single-finger swipe gesture here (Ctrl+C
+                // / Ctrl+D / jump to top / jump to bottom) via a plain
+                // `.gesture()`. SwiftUI's `.gesture()` takes priority over
+                // an embedded UIKit view's own gesture recognizers, so it
+                // was stealing every single-finger drag from SwiftTerm's
+                // TerminalView (a UIScrollView) before its own
+                // panGestureRecognizer could scroll — normal scrolling only
+                // ever worked via the separate long-press text-selection
+                // path, which isn't blocked the same way. That
+                // functionality is fully covered elsewhere without the
+                // conflict: Ctrl+C/Ctrl+D via the extra-keys "•••" shortcuts
+                // sheet, jump-to-latest/PgUp/PgDn via scrollControlsOverlay
+                // and the extended key row.
                 TerminalRepresentable(terminalView: viewModel.terminalView)
                     .padding(.horizontal, 6)
                     .simultaneousGesture(
@@ -53,7 +65,6 @@ struct TerminalScreenView: View {
                             }
                             .onEnded { _ in fontSizeAtGestureStart = nil }
                     )
-                    .modifier(GestureModifier(gesturesEnabled: gesturesEnabled, onSwipe: handleSwipe))
 
                 if viewModel.isViewingHistory {
                     VStack(spacing: 2) {
@@ -699,28 +710,6 @@ struct TerminalScreenView: View {
         }
     }
 
-    private func handleSwipe(_ gesture: DragGesture.Value) {
-        let horizontalAmount = gesture.translation.width
-        let verticalAmount = gesture.translation.height
-
-        if abs(horizontalAmount) > abs(verticalAmount) {
-            if horizontalAmount > 0 {
-                // Swipe right: send Ctrl+C (interrupt)
-                viewModel.sendControlChord("c")
-            } else {
-                // Swipe left: send Ctrl+D (exit/EOF)
-                viewModel.sendControlChord("d")
-            }
-        } else {
-            if verticalAmount > 0 {
-                // Swipe down: scroll to bottom
-                viewModel.scrollToLatestOutput()
-            } else {
-                // Swipe up: scroll to top
-                viewModel.scrollPage(-5)
-            }
-        }
-    }
 }
 
 extension View {
@@ -734,19 +723,6 @@ extension View {
                 .onChanged { _ in onPress() }
                 .onEnded { _ in onRelease() }
         )
-    }
-}
-
-private struct GestureModifier: ViewModifier {
-    let gesturesEnabled: Bool
-    let onSwipe: (DragGesture.Value) -> Void
-
-    func body(content: Content) -> some View {
-        if gesturesEnabled {
-            content.gesture(DragGesture(minimumDistance: 50).onEnded(onSwipe))
-        } else {
-            content
-        }
     }
 }
 
