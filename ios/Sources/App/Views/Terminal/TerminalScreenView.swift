@@ -30,6 +30,7 @@ struct TerminalScreenView: View {
     @State private var showingOutputFilter = false
     @State private var showingWorkspaceFavorites = false
     @State private var showingTerminalSettings = false
+    @State private var showingDiff = false
     @AppStorage("dev.termvault.settings.fontSize") private var fontSize: Double = 14
     @AppStorage("dev.termvault.settings.gesturesEnabled") private var gesturesEnabled = true
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
@@ -305,6 +306,11 @@ struct TerminalScreenView: View {
         .sheet(isPresented: $showingWorkspaceFavorites) {
             WorkspaceFavoritesView()
         }
+        .sheet(isPresented: $showingDiff) {
+            if let workspace = viewModel.activeWorkspace {
+                GitDiffView(host: viewModel.host, path: workspace.path)
+            }
+        }
     }
 
     private var topBar: some View {
@@ -393,6 +399,11 @@ struct TerminalScreenView: View {
                 if canReconnect {
                     Button { Task { await viewModel.reconnect() } } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
+                    }
+                }
+                if viewModel.activeWorkspace != nil {
+                    Button { showingDiff = true } label: {
+                        Label("View Diff", systemImage: "plus.forwardslash.minus")
                     }
                 }
                 Divider()

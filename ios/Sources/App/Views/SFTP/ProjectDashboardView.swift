@@ -4,6 +4,7 @@ struct ProjectDashboardView: View {
     @StateObject private var viewModel: ProjectDashboardViewModel
     @AppStorage("dev.termvault.savedCommands") private var savedCommandsData = "[]"
     @State private var command = ""
+    @State private var showingDiff = false
 
     init(host: Host, path: String) {
         _viewModel = StateObject(wrappedValue: ProjectDashboardViewModel(host: host, path: path))
@@ -32,7 +33,8 @@ struct ProjectDashboardView: View {
                 HStack {
                     taskButton("Pull", command: "git pull --ff-only")
                     taskButton("Fetch", command: "git fetch --all --prune")
-                    taskButton("Diff", command: "git diff --stat")
+                    Button("View Diff") { showingDiff = true }
+                        .buttonStyle(.bordered)
                 }
             }
 
@@ -89,6 +91,9 @@ struct ProjectDashboardView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) { Button("OK") {} } message: { Text(viewModel.errorMessage ?? "") }
+        .sheet(isPresented: $showingDiff) {
+            GitDiffView(host: viewModel.host, path: viewModel.path)
+        }
     }
 
     private func taskButton(_ title: String, command: String) -> some View {
