@@ -51,6 +51,32 @@ jobs:
             -scheme TermVault \
             -clonedSourcePackagesDirPath build/SourcePackages
 
+      - name: Find an available iOS Simulator
+        id: simulator
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E 'iPhone (1[5-9]|[2-9][0-9])' | sed -E 's/^ *([^(]+) \(.*/\1/' | sed -E 's/ *$//')
+          if [ -z "$DEVICE" ]; then
+            echo "No iPhone 15+ simulator found; falling back to any available iPhone simulator"
+            DEVICE=$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/^ *([^(]+) \(.*/\1/' | sed -E 's/ *$//')
+          fi
+          echo "Using simulator: $DEVICE"
+          echo "name=$DEVICE" >> "$GITHUB_OUTPUT"
+
+      # TermVaultTests exists (unit tests for ErrorLogger, HostKeyApprovalService,
+      # navigation, attachment naming) with a wired-up scheme, but nothing
+      # ran it — this workflow only ever built the app, so the suite could
+      # silently rot without CI noticing. Runs on the simulator SDK (unit
+      # tests can't run against -sdk iphoneos) before the release build, so
+      # a broken test fails fast instead of wasting time packaging an IPA.
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project TermVault.xcodeproj \
+            -scheme TermVault \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages
+
       - name: Build (unsigned, device SDK)
         run: |
           xcodebuild build \
