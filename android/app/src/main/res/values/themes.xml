@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Only used as the Activity's pre-Compose window theme (window
+      background before setContent{} runs, and the manifest's required
+      theme attribute) — all real UI is Jetpack Compose / Material3.
+      Parented on a plain platform theme rather than a Material Components
+      XML theme, since this app has no other XML-view dependency on that
+      library.
+    -->
+    <style name="Theme.TermVault" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        <item name="android:statusBarColor">@color/ic_launcher_background</item>
+        <item name="android:navigationBarColor">@color/ic_launcher_background</item>
+    </style>
+</resources>
