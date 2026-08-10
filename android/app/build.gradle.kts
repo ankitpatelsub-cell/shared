@@ -45,11 +45,16 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/DEPENDENCIES"
-            // bcprov/bcpkix/bcutil-jdk18on all ship the identical
-            // multi-release-jar OSGi manifest at this path, which collides
-            // during resource merging — content is identical across all
-            // three, so excluding it (keeping whichever copy wins) is safe.
+            // bcprov/bcpkix/bcutil-jdk18on all ship identical copies of
+            // their own metadata (OSGi manifest, license, notice) at these
+            // paths, which collide during resource merging one file at a
+            // time as each is discovered — pick the whole class up at once
+            // rather than re-running CI per file. Content is identical
+            // across all three jars, so excluding is safe.
             excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/*.md"
         }
     }
 }
