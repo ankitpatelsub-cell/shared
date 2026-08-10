@@ -4,6 +4,11 @@ import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
+private enum PhotoLoadError: Error, LocalizedError {
+    case unavailable
+    var errorDescription: String? { "This photo couldn't be loaded from your library." }
+}
+
 struct TerminalScreenView: View {
     @Query(sort: \Snippet.name) private var snippets: [Snippet]
     @ObservedObject var viewModel: TerminalViewModel
@@ -669,21 +674,66 @@ struct TerminalScreenView: View {
 
     private func uploadPhotos(_ items: [PhotosPickerItem]) async {
         var temporaryURLs: [URL] = []
-        do {
-            for item in items {
-                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+        var failureCount = 0
+        var lastFailureDetail: String?
+
+        for item in items {
+            do {
+                let data = try await loadPhotoData(item)
                 let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
                 let url = FileManager.default.temporaryDirectory
                     .appendingPathComponent("termvault-\(UUID().uuidString).\(fileExtension)")
                 try data.write(to: url, options: .atomic)
                 temporaryURLs.append(url)
+            } catch {
+                failureCount += 1
+                lastFailureDetail = error.localizedDescription
+                ErrorLogger.shared.log(
+                    category: .fileOperation,
+                    message: "Couldn't load a selected photo",
+                    technicalDetails: error.localizedDescription
+                )
             }
+        }
+
+        if !temporaryURLs.isEmpty {
             await uploadAttachments(temporaryURLs)
-        } catch {
-            attachmentMessage = error.localizedDescription
+        }
+        if failureCount > 0 {
+            // PhotosPickerItem.loadTransferable(type: Data.self) surfaces a
+            // generic system error here — historically worded in a way
+            // that reads as "this file is corrupted" even when the photo
+            // itself is completely fine. The most common real cause is
+            // transient: the photo is still downloading from iCloud, or a
+            // momentary decode hiccup — loadPhotoData() already retries
+            // for exactly that reason, so a failure that survives the
+            // retries is worth a clearer, more accurate message than the
+            // raw system text.
+            let detail = lastFailureDetail.map { " (\($0))" } ?? ""
+            attachmentMessage = temporaryURLs.isEmpty
+                ? "Couldn't load the selected photo\(items.count > 1 ? "s" : "")\(detail). If it's still downloading from iCloud, wait a moment and try again."
+                : "Uploaded \(temporaryURLs.count) photo(s); \(failureCount) couldn't be loaded — if they're still downloading from iCloud, try again shortly."
         }
         temporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
         selectedPhotos = []
+    }
+
+    /// Retries the load before giving up — the most common real cause of a
+    /// failure here is transient (the asset is still downloading from
+    /// iCloud), not an actually-corrupt file.
+    private func loadPhotoData(_ item: PhotosPickerItem) async throws -> Data {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                if let data = try await item.loadTransferable(type: Data.self) {
+                    return data
+                }
+            } catch {
+                lastError = error
+            }
+            if attempt < 2 { try? await Task.sleep(for: .milliseconds(400)) }
+        }
+        throw lastError ?? PhotoLoadError.unavailable
     }
 
     private func uploadAttachments(_ urls: [URL]) async {
