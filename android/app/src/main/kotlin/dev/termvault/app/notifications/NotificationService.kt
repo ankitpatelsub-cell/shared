@@ -1,12 +1,16 @@
 package dev.termvault.app.notifications
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import dev.termvault.app.MainActivity
 import dev.termvault.app.data.db.WorkspaceSessionEntity
 
@@ -57,6 +61,14 @@ object NotificationService {
     }
 
     private fun post(context: Context, id: Int, notification: android.app.Notification) {
+        // POST_NOTIFICATIONS is a runtime-requested permission on API 33+
+        // (the manifest <uses-permission> alone doesn't grant it) — skip
+        // posting rather than crash if the user hasn't granted it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
