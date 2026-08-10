@@ -57,6 +57,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.2")
+    // Explicit, modern Fragment pin: MainActivity (a FragmentActivity, for
+    // BiometricPrompt) calls registerForActivityResult, which lint requires
+    // Fragment >= 1.3.0 for — whatever old version biometric:1.1.0 pulls in
+    // transitively isn't enough on its own.
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
