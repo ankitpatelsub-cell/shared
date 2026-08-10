@@ -78,10 +78,13 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
 
     // SSH + SFTP. Verified against the real hierynomus/sshj source
-    // (0.40.0 on Maven Central) rather than assumed — see android/README.md.
+    // (0.40.0 on Maven Central) rather than assumed. BouncyCastle pinned to
+    // 1.85 (not 1.85.2) since bcpkix-jdk18on never published a 1.85.2
+    // release — only bcprov-jdk18on did — confirmed against Maven Central's
+    // maven-metadata.xml for both artifacts.
     implementation("com.hierynomus:sshj:0.40.0")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.85.2")
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.85.2")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.85")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.85")
 
     // Networking (GitHub API + TermVault cloud vault backend).
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
