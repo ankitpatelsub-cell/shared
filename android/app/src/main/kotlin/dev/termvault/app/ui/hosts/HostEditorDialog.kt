@@ -68,7 +68,7 @@ fun HostEditorDialog(
                         SegmentedButton(
                             selected = authMethod == method,
                             onClick = { authMethod = method },
-                            shape = SegmentedButtonDefaultsShape(index, HostAuthMethod.entries.size),
+                            shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index = index, count = HostAuthMethod.entries.size),
                         ) { Text(method.displayName) }
                     }
                 }
@@ -140,7 +140,3 @@ fun HostEditorDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-private fun SegmentedButtonDefaultsShape(index: Int, count: Int) =
-    androidx.compose.material3.SegmentedButtonDefaults.itemShape(index = index, count = count)

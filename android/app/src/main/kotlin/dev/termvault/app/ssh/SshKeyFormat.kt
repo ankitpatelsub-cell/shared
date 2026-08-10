@@ -19,9 +19,9 @@ object SshWire {
     /** SSH "mpint": big-endian, minimal, signed two's-complement (leading 0x00 if the high bit would read negative). */
     fun mpint(bytes: ByteArray): ByteArray {
         var trimmed = bytes.dropWhile { it == 0.toByte() }
-        if (trimmed.isEmpty()) trimmed = listOf(0)
+        if (trimmed.isEmpty()) trimmed = listOf(0.toByte())
         if ((trimmed.first().toInt() and 0x80) != 0) {
-            trimmed = listOf(0) + trimmed
+            trimmed = listOf(0.toByte()) + trimmed
         }
         return string(trimmed.toByteArray())
     }
