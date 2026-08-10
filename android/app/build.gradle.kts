@@ -45,6 +45,11 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/DEPENDENCIES"
+            // bcprov/bcpkix/bcutil-jdk18on all ship the identical
+            // multi-release-jar OSGi manifest at this path, which collides
+            // during resource merging — content is identical across all
+            // three, so excluding it (keeping whichever copy wins) is safe.
+            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
 }
