@@ -181,6 +181,7 @@ final class SessionStore: ObservableObject {
             SessionHistoryStore.shared.record(vm)
             vm.disconnect()
         case .sftp(let vm):
+            SessionHistoryStore.shared.record(sftp: vm)
             vm.cancelAllTransfers()
         }
         sessions.removeAll { $0.id == session.id }

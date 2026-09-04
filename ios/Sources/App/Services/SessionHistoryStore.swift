@@ -1,6 +1,10 @@
 import Foundation
 
 struct SessionHistoryRecord: Codable, Identifiable, Equatable {
+    enum Kind: String, Codable {
+        case ssh, sftp
+    }
+
     let id: UUID
     let hostID: UUID
     let hostLabel: String
@@ -13,6 +17,48 @@ struct SessionHistoryRecord: Codable, Identifiable, Equatable {
     var averageLatency: Int = 0 // milliseconds
     var dataTransferred: Int64 = 0 // bytes
     var commandCount: Int = 0
+    var kind: Kind = .ssh
+
+    init(
+        id: UUID, hostID: UUID, hostLabel: String, workspaceName: String?,
+        startedAt: Date, endedAt: Date, transcript: String, isBookmarked: Bool,
+        tags: [String] = [], averageLatency: Int = 0, dataTransferred: Int64 = 0,
+        commandCount: Int = 0, kind: Kind = .ssh
+    ) {
+        self.id = id
+        self.hostID = hostID
+        self.hostLabel = hostLabel
+        self.workspaceName = workspaceName
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.transcript = transcript
+        self.isBookmarked = isBookmarked
+        self.tags = tags
+        self.averageLatency = averageLatency
+        self.dataTransferred = dataTransferred
+        self.commandCount = commandCount
+        self.kind = kind
+    }
+
+    // Custom decoding so records saved before `kind` existed (every SSH
+    // session recorded up to this point) still decode instead of throwing —
+    // they default to `.ssh`, which is what they always were.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        hostID = try container.decode(UUID.self, forKey: .hostID)
+        hostLabel = try container.decode(String.self, forKey: .hostLabel)
+        workspaceName = try container.decodeIfPresent(String.self, forKey: .workspaceName)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        transcript = try container.decode(String.self, forKey: .transcript)
+        isBookmarked = try container.decode(Bool.self, forKey: .isBookmarked)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        averageLatency = try container.decodeIfPresent(Int.self, forKey: .averageLatency) ?? 0
+        dataTransferred = try container.decodeIfPresent(Int64.self, forKey: .dataTransferred) ?? 0
+        commandCount = try container.decodeIfPresent(Int.self, forKey: .commandCount) ?? 0
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .ssh
+    }
 
     var displayDataTransferred: String {
         let units = ["B", "KB", "MB", "GB"]
@@ -58,6 +104,20 @@ final class SessionHistoryStore: ObservableObject {
             averageLatency: session.averageLatency,
             dataTransferred: session.sessionDataTransferred,
             commandCount: session.sessionCommandCount
+        ), at: 0)
+        records = Array(records.prefix(maxRecords))
+        save()
+    }
+
+    /// Records an SFTP browsing session — previously only SSH terminal
+    /// sessions ever showed up in Session History, so closing an SFTP tab
+    /// left no trace at all no matter what was browsed or transferred.
+    func record(sftp session: SFTPBrowserViewModel) {
+        guard let summary = session.historySummary else { return }
+        records.insert(SessionHistoryRecord(
+            id: UUID(), hostID: session.host.id, hostLabel: session.host.label,
+            workspaceName: nil, startedAt: session.startedAt, endedAt: Date(),
+            transcript: summary, isBookmarked: false, kind: .sftp
         ), at: 0)
         records = Array(records.prefix(maxRecords))
         save()

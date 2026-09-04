@@ -85,6 +85,9 @@ struct SessionHistoryView: View {
                                     HStack(spacing: 12) {
                                         VStack(alignment: .leading, spacing: 4) {
                                             HStack(spacing: 8) {
+                                                Image(systemName: record.kind == .sftp ? "folder.fill" : "terminal.fill")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
                                                 Text(record.workspaceName ?? record.hostLabel)
                                                     .fontWeight(.semibold)
                                                     .lineLimit(1)
@@ -301,7 +304,7 @@ struct SessionHistoryView: View {
                         Divider()
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Transcript")
+                            Text(record.kind == .sftp ? "Summary" : "Transcript")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 

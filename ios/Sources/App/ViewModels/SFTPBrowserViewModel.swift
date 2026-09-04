@@ -8,8 +8,14 @@ final class SFTPBrowserViewModel: ObservableObject {
     private let connectionID: UUID
     private let sshClient: SSHClient
     let persistenceKey: String
+    let startedAt = Date()
     @Published var customTitle: String?
     @Published var isPinned = false
+
+    // Tracked purely so a browsing session can be summarized in Session
+    // History (see `historySummary`) — SFTP sessions never got recorded
+    // there at all before, unlike SSH terminal sessions.
+    private var visitedPaths: Set<String> = ["/"]
 
     @Published var currentPath: String = "/"
     @Published var entries: [SFTPEntry] = []
@@ -82,6 +88,7 @@ final class SFTPBrowserViewModel: ObservableObject {
 
     func load(path: String? = nil) async {
         if let path { currentPath = path }
+        visitedPaths.insert(currentPath)
         isLoading = true
         defer { isLoading = false }
         do {
@@ -351,6 +358,27 @@ final class SFTPBrowserViewModel: ObservableObject {
             return
         }
         await runFileCommand("chmod \(mode) -- \(ProjectDashboardViewModel.quote(entry.path))")
+    }
+
+    /// One-line summary for Session History — `nil` when the session was
+    /// just a peek (opened, never navigated or transferred anything), so
+    /// idle opens don't spam the history list.
+    var historySummary: String? {
+        let downloads = transfers.filter { $0.isDownload && $0.status == .completed }.count
+        let uploads = transfers.filter { !$0.isDownload && $0.status == .completed }.count
+        guard visitedPaths.count > 1 || downloads > 0 || uploads > 0 else { return nil }
+
+        var parts: [String] = []
+        if visitedPaths.count > 1 {
+            parts.append("Browsed \(visitedPaths.count) folder\(visitedPaths.count == 1 ? "" : "s")")
+        }
+        if downloads > 0 {
+            parts.append("Downloaded \(downloads) file\(downloads == 1 ? "" : "s")")
+        }
+        if uploads > 0 {
+            parts.append("Uploaded \(uploads) file\(uploads == 1 ? "" : "s")")
+        }
+        return parts.joined(separator: " • ")
     }
 
     private func runFileCommand(_ command: String) async {
