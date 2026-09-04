@@ -23,8 +23,7 @@ import SwiftTerm
 struct ExtraKeysAccessoryView: View {
     @ObservedObject var viewModel: TerminalViewModel
     @State private var showingShortcuts = false
-    @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
-    @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
+    @AppStorage("dev.termvault.settings.extraKeysOrder") private var keysOrder = ExtraKeysOrder(keys: ExtraKey.defaultOrder)
     @State private var backspaceRepeatTask: Task<Void, Never>?
 
     private var terminalView: TerminalView { viewModel.terminalView }
@@ -32,56 +31,9 @@ struct ExtraKeysAccessoryView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                keyButton("esc") { viewModel.sendRawBytes([0x1B]) }
-                keyButton("tab") { viewModel.sendRawBytes([0x09]) }
-                toggleButton("ctrl", modifier: .ctrl)
-                toggleButton("alt", modifier: .alt)
-
-                divider
-
-                // Holding this repeats DEL every 80ms (after an initial 400ms
-                // delay) the same way the scroll-page buttons repeat, so
-                // clearing a long typo doesn't mean tapping dozens of times.
-                repeatKeyButton("⌫") { startRepeatingBackspace() } onRelease: {
-                    stopRepeatingBackspace()
+                ForEach(keysOrder.keys) { key in
+                    keyView(for: key)
                 }
-                keyButton("Clear") { clearCurrentLine() }
-
-                if keyRowLayout != "compact" {
-                    divider
-                    keyButton("~") { sendText("~") }
-                    keyButton("/") { sendText("/") }
-                    keyButton("|") { sendText("|") }
-                    keyButton("-") { sendText("-") }
-                }
-
-                divider
-
-                keyButton("←") { sendCSI("D") }
-                keyButton("↑") { sendCSI("A") }
-                keyButton("↓") { sendCSI("B") }
-                keyButton("→") { sendCSI("C") }
-
-                divider
-
-                if extendedKeys && keyRowLayout == "full" {
-                    keyButton("Home") { sendCSI("H") }
-                    keyButton("End") { sendCSI("F") }
-                    keyButton("PgUp") { viewModel.scrollPage(-1) }
-                    keyButton("PgDn") { viewModel.scrollPage(1) }
-                    keyButton("Del") { sendCSI("3~") }
-                    keyButton("F1") { viewModel.sendRawBytes(Array("\u{1B}OP".utf8)) }
-                }
-
-                divider
-
-                keyButton("Copy") { terminalView.copy(nil) }
-                keyButton("Paste") { terminalView.paste(nil) }
-                keyButton("Select") { terminalView.selectAll(nil) }
-
-                divider
-
-                keyButton("•••") { showingShortcuts = true }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -96,10 +48,70 @@ struct ExtraKeysAccessoryView: View {
         }
     }
 
-    private var divider: some View {
-        Rectangle()
-            .fill(.secondary.opacity(0.25))
-            .frame(width: 1, height: 22)
+    /// Which SwiftUI control (and action) a given catalog entry renders as —
+    /// see `KeyboardShortcutsCustomizeView` for where the user picks which
+    /// of these show up here, and in what order.
+    @ViewBuilder
+    private func keyView(for key: ExtraKey) -> some View {
+        switch key {
+        case .esc:
+            keyButton("esc") { viewModel.sendRawBytes([0x1B]) }
+        case .tab:
+            keyButton("tab") { viewModel.sendRawBytes([0x09]) }
+        case .shiftTab:
+            // Standard "backtab" escape — reverse tab-completion cycling in
+            // shells/readline, and reverse focus movement in curses UIs.
+            keyButton("⇧tab") { viewModel.sendRawBytes(Array("\u{1B}[Z".utf8)) }
+        case .ctrl:
+            toggleButton("ctrl", modifier: .ctrl)
+        case .alt:
+            toggleButton("alt", modifier: .alt)
+        case .backspace:
+            // Holding this repeats DEL every 80ms (after an initial 400ms
+            // delay) the same way the scroll-page buttons repeat, so
+            // clearing a long typo doesn't mean tapping dozens of times.
+            repeatKeyButton("⌫") { startRepeatingBackspace() } onRelease: {
+                stopRepeatingBackspace()
+            }
+        case .clearLine:
+            keyButton("Clear") { clearCurrentLine() }
+        case .tilde:
+            keyButton("~") { sendText("~") }
+        case .slash:
+            keyButton("/") { sendText("/") }
+        case .pipe:
+            keyButton("|") { sendText("|") }
+        case .dash:
+            keyButton("-") { sendText("-") }
+        case .arrowLeft:
+            keyButton("←") { sendCSI("D") }
+        case .arrowUp:
+            keyButton("↑") { sendCSI("A") }
+        case .arrowDown:
+            keyButton("↓") { sendCSI("B") }
+        case .arrowRight:
+            keyButton("→") { sendCSI("C") }
+        case .home:
+            keyButton("Home") { sendCSI("H") }
+        case .end:
+            keyButton("End") { sendCSI("F") }
+        case .pageUp:
+            keyButton("PgUp") { viewModel.scrollPage(-1) }
+        case .pageDown:
+            keyButton("PgDn") { viewModel.scrollPage(1) }
+        case .delete:
+            keyButton("Del") { sendCSI("3~") }
+        case .f1:
+            keyButton("F1") { viewModel.sendRawBytes(Array("\u{1B}OP".utf8)) }
+        case .copy:
+            keyButton("Copy") { terminalView.copy(nil) }
+        case .paste:
+            keyButton("Paste") { terminalView.paste(nil) }
+        case .selectAll:
+            keyButton("Select") { terminalView.selectAll(nil) }
+        case .shortcuts:
+            keyButton("•••") { showingShortcuts = true }
+        }
     }
 
     private func keyButton(_ label: String, action: @escaping () -> Void) -> some View {

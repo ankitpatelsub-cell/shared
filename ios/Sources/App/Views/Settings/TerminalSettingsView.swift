@@ -5,8 +5,6 @@ struct TerminalSettingsView: View {
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
     @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
-    @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
-    @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
     @State private var autoApproveSettings = AutoApproveSettings.shared
 
     var body: some View {
@@ -59,14 +57,10 @@ struct TerminalSettingsView: View {
                         .help("Skip the confirmation and paste multi-line input immediately")
                     }
 
-                    Toggle("Extended Keys", isOn: $extendedKeys)
-                        .help("Show additional keyboard shortcuts")
-
-                    Picker("Key Row Layout", selection: $keyRowLayout) {
-                        Text("Compact").tag("compact")
-                        Text("Standard").tag("standard")
-                        Text("Full").tag("full")
+                    NavigationLink("Customize Keyboard Row") {
+                        KeyboardShortcutsCustomizeView()
                     }
+                    .help("Choose which keys show above the keyboard, and in what order")
                 }
 
                 Section("Approvals") {

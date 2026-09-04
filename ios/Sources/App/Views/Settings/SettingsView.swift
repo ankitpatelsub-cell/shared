@@ -7,10 +7,8 @@ struct SettingsView: View {
     @AppStorage("dev.termvault.settings.pasteProtection") private var pasteProtection = true
     @AppStorage("dev.termvault.settings.appearance") private var appearance = "system"
     @AppStorage("dev.termvault.settings.accent") private var accent = "blue"
-    @AppStorage("dev.termvault.settings.extendedKeys") private var extendedKeys = true
     @AppStorage("dev.termvault.settings.terminalFont") private var terminalFont = "system"
     @AppStorage("dev.termvault.settings.terminalTheme") private var terminalTheme = "midnight"
-    @AppStorage("dev.termvault.settings.keyRowLayout") private var keyRowLayout = "standard"
 
     var body: some View {
         NavigationStack {
@@ -36,7 +34,6 @@ struct SettingsView: View {
                         Text("Font Size: \(Int(fontSize))")
                     }
                     Toggle("Confirm Multiline Paste", isOn: $pasteProtection)
-                    Toggle("Extended Key Row", isOn: $extendedKeys)
                     Picker("Font", selection: $terminalFont) {
                         Text("SF Mono").tag("system")
                         Text("Menlo").tag("menlo")
@@ -48,10 +45,8 @@ struct SettingsView: View {
                         Text("Dracula").tag("dracula")
                         Text("Paper Light").tag("paper")
                     }
-                    Picker("Keyboard Row", selection: $keyRowLayout) {
-                        Text("Compact").tag("compact")
-                        Text("Standard").tag("standard")
-                        Text("Full").tag("full")
+                    NavigationLink("Customize Keyboard Row") {
+                        KeyboardShortcutsCustomizeView()
                     }
                     Text("Pinch directly on the terminal to change its font size.")
                         .font(.caption)
