@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same refined teal used for AccentColor on the iOS side. -->
+    <color name="accent_light">#1499A9</color>
+    <color name="accent_dark">#37C9C9</color>
+    <color name="ic_launcher_background">#0D1418</color>
+</resources>
