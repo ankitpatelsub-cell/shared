@@ -67,6 +67,7 @@ struct SFTPBrowserView: View {
                             entry: entry,
                             isSelected: selectedEntries.contains(entry.id),
                             isMultiSelectMode: isMultiSelectMode,
+                            isPinned: viewModel.isPinned(entry.path),
                             onTap: {
                                 if isMultiSelectMode {
                                     toggleSelection(entry.id)
@@ -77,7 +78,16 @@ struct SFTPBrowserView: View {
                             },
                             onDownload: {
                                 Task { downloadedURL = await viewModel.download(entry) }
-                            }
+                            },
+                            onTogglePin: { viewModel.togglePin(entry.path) },
+                            onRename: {
+                                renameText = entry.name
+                                renamingEntry = entry
+                            },
+                            onCopyMoveOrPermissions: { operatingOnEntry = entry },
+                            onPreview: entry.isDirectory ? nil : { editingFile = entry },
+                            onDelete: { deletingEntry = entry },
+                            onStartAgent: (entry.isDirectory && onLaunch != nil) ? { tool in onLaunch?(entry.path, tool) } : nil
                         )
                         .swipeActions {
                             if !isMultiSelectMode {
@@ -401,8 +411,15 @@ private struct SFTPEntryRow: View {
     let entry: SFTPEntry
     let isSelected: Bool
     let isMultiSelectMode: Bool
+    let isPinned: Bool
     let onTap: () -> Void
     let onDownload: () -> Void
+    let onTogglePin: () -> Void
+    let onRename: () -> Void
+    let onCopyMoveOrPermissions: () -> Void
+    let onPreview: (() -> Void)?
+    let onDelete: () -> Void
+    let onStartAgent: ((AgentTool) -> Void)?
 
     var body: some View {
         HStack {
@@ -420,12 +437,45 @@ private struct SFTPEntryRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if !entry.isDirectory && !isMultiSelectMode {
-                Button(action: onDownload) {
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundStyle(.blue)
+            if !isMultiSelectMode {
+                if !entry.isDirectory {
+                    Button(action: onDownload) {
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+                // A visible, always-tappable actions button — the same
+                // actions used to be reachable only via a long-press
+                // `.contextMenu`, which this row's whole-area `onTapGesture`
+                // below fights with for the touch (SwiftUI's tap and
+                // long-press recognizers on overlapping views don't compose
+                // cleanly), making the menu unreliable to trigger.
+                Menu {
+                    if let onStartAgent {
+                        Menu("Start Agent Here") {
+                            ForEach(AgentTool.allCases) { tool in
+                                Button(tool.title) { onStartAgent(tool) }
+                            }
+                        }
+                    }
+                    Button(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin") { onTogglePin() }
+                    Button("Rename", systemImage: "pencil") { onRename() }
+                    Button("Copy, Move or Permissions", systemImage: "doc.on.doc") { onCopyMoveOrPermissions() }
+                    if let onPreview {
+                        Button("Preview / Edit", systemImage: "eye") { onPreview() }
+                    }
+                    if !entry.isDirectory {
+                        Button("Download", systemImage: "arrow.down.circle") { onDownload() }
+                    }
+                    Divider()
+                    Button("Delete", systemImage: "trash", role: .destructive) { onDelete() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Actions for \(entry.name)")
             }
         }
         .contentShape(Rectangle())
